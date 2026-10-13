@@ -107,7 +107,15 @@ function mapProposal(row: any): InteractionProposalRecord {
   };
 }
 
-export function createPgInteractionRepository(options: PgAdapterOptions): InteractionRepository {
+export interface PgInteractionRepository extends InteractionRepository {
+  checkHealth(): Promise<{
+    ok: boolean;
+    latencyMs: number;
+    poolStatus: { totalCount: number; idleCount: number; waitingCount: number };
+  }>;
+}
+
+export function createPgInteractionRepository(options: PgAdapterOptions): PgInteractionRepository {
   let pool = options.pool;
   if (!pool) {
     if (!options.connectionString) {
@@ -872,6 +880,21 @@ export function createPgInteractionRepository(options: PgAdapterOptions): Intera
 
       const res = await effectivePool.query(query, queryParams);
       return res.rows.map(mapProposal);
+    },
+
+    async checkHealth() {
+      const start = Date.now();
+      await effectivePool.query('SELECT 1');
+      const latencyMs = Date.now() - start;
+      return {
+        ok: true,
+        latencyMs,
+        poolStatus: {
+          totalCount: (effectivePool as any).totalCount ?? 1,
+          idleCount: (effectivePool as any).idleCount ?? 1,
+          waitingCount: (effectivePool as any).waitingCount ?? 0,
+        },
+      };
     },
   };
 }

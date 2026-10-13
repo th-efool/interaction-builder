@@ -47,6 +47,11 @@
       "import": "./dist/adapters/ai/index.js",
       "default": "./dist/adapters/ai/index.js"
     },
+    "./adapters/sqlite": {
+      "types": "./dist/adapters/sqlite/index.d.ts",
+      "import": "./dist/adapters/sqlite/index.js",
+      "default": "./dist/adapters/sqlite/index.js"
+    },
     "./testkit": {
       "types": "./dist/testkit/index.d.ts",
       "import": "./dist/testkit/index.js",

@@ -15,6 +15,7 @@ const entryPoints = [
   { in: 'src/adapters/pg/index.ts', out: 'adapters/pg/index' },
   { in: 'src/adapters/http/index.ts', out: 'adapters/http/index' },
   { in: 'src/adapters/ai/index.ts', out: 'adapters/ai/index' },
+  { in: 'src/adapters/sqlite/index.ts', out: 'adapters/sqlite/index' },
   { in: 'src/testkit/index.ts', out: 'testkit/index' },
 ];
 
