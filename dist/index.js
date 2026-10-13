@@ -411,14 +411,28 @@ async function runAssistantTurn(opts) {
   if (!ws) throw new Error("WORKSPACE_NOT_FOUND");
   if (ws.lifecycle !== "active") throw new Error("WORKSPACE_NOT_ACTIVE");
   let observedRevision = opts.observedRevision ?? ws.revision;
+  let triggeringMessageId = null;
   if (runId) {
     const run = await repo.getRun({ runId, workspaceId });
     if (run) {
       if (run.status === "canceled") throw new Error("RUN_CANCELED");
       observedRevision = run.observedRevision;
+      triggeringMessageId = run.triggeringMessageId;
     }
   }
-  const history = await repo.listMessages({ workspaceId, ownerId, limit: 20 });
+  let history;
+  if (triggeringMessageId) {
+    let page = await repo.listMessages({ workspaceId, ownerId, limit: 100 });
+    let trigger = page.find((message) => message.id === triggeringMessageId);
+    while (!trigger && page.length === 100) {
+      page = await repo.listMessages({ workspaceId, ownerId, beforeSequence: page[0].sequence, limit: 100 });
+      trigger = page.find((message) => message.id === triggeringMessageId);
+    }
+    if (!trigger) throw new Error("TRIGGERING_MESSAGE_NOT_FOUND");
+    history = await repo.listMessages({ workspaceId, ownerId, beforeSequence: trigger.sequence + 1, limit: 20 });
+  } else {
+    history = await repo.listMessages({ workspaceId, ownerId, limit: 20 });
+  }
   if (history.length === 0) {
     return { success: true, assistantMessageId: null, text: "", stepsCount: 0, runId };
   }

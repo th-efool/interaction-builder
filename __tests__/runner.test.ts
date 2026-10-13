@@ -9,6 +9,23 @@ import { createAiSdkModelAdapter } from '../src/adapters/ai';
 const WS = '7b91950e-561b-4fbc-bdf5-d4e51147a4f9';
 
 describe('Generic Assistant Runner & Durable Replay', () => {
+  it('binds a run to its triggering message even if a newer user message arrives', async () => {
+    const repo = new MemoryInteractionRepository();
+    await repo.createWorkspace({ id: WS, ownerId: 'user-1', domainId: 'agenda', domainVersion: 1, initialSnapshot: sampleAgenda });
+    const first = await repo.appendMessage({ workspaceId: WS, ownerId: 'user-1', id: crypto.randomUUID(), role: 'user',
+      parts: [{ type: 'text', text: 'First request' }] });
+    await repo.appendMessage({ workspaceId: WS, ownerId: 'user-1', id: crypto.randomUUID(), role: 'user',
+      parts: [{ type: 'text', text: 'Later request' }] });
+    const leaseToken = crypto.randomUUID();
+    await repo.claimRun({ workspaceId: WS, leaseOwner: 'worker', leaseToken, leaseDurationMs: 60_000 });
+    let seen: string[] = [];
+    await runAssistantTurn({ workspaceId: WS, ownerId: 'user-1', repo, domain: agendaDomain,
+      model: { executeTurn: async ({ messages }) => { seen = messages.map(message => message.content); return { text: 'Done', stepsCount: 0 }; } },
+      createTools: () => ({}), runId: first.run!.id, leaseToken,
+    });
+    expect(seen).toEqual(['First request']);
+  });
+
   it('executes model tool calls against commitAction and appends assistant response', async () => {
     const repo = new MemoryInteractionRepository();
     await repo.createWorkspace({
