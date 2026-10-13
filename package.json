@@ -55,7 +55,9 @@
   "files": [
     "dist",
     "migrations",
-    "README.md"
+    "README.md",
+    "docs",
+    "Documentation"
   ],
   "scripts": {
     "build": "node build.mjs",
