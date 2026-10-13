@@ -1,7 +1,6 @@
 {
   "name": "interaction-builder",
   "version": "0.1.0",
-  "private": true,
   "description": "Deterministic conversational interaction engine with transactional persistence, tool execution, and UI synchronization",
   "type": "module",
   "main": "./dist/index.js",
