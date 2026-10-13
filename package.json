@@ -1,0 +1,97 @@
+{
+  "name": "interaction-builder",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Deterministic conversational interaction engine with transactional persistence, tool execution, and UI synchronization",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./core": {
+      "types": "./dist/core/index.d.ts",
+      "import": "./dist/core/index.js",
+      "default": "./dist/core/index.js"
+    },
+    "./runtime": {
+      "types": "./dist/runtime/index.d.ts",
+      "import": "./dist/runtime/index.js",
+      "default": "./dist/runtime/index.js"
+    },
+    "./client": {
+      "types": "./dist/client/index.d.ts",
+      "import": "./dist/client/index.js",
+      "default": "./dist/client/index.js"
+    },
+    "./react": {
+      "types": "./dist/react/index.d.ts",
+      "import": "./dist/react/index.js",
+      "default": "./dist/react/index.js"
+    },
+    "./adapters/pg": {
+      "types": "./dist/adapters/pg/index.d.ts",
+      "import": "./dist/adapters/pg/index.js",
+      "default": "./dist/adapters/pg/index.js"
+    },
+    "./adapters/http": {
+      "types": "./dist/adapters/http/index.d.ts",
+      "import": "./dist/adapters/http/index.js",
+      "default": "./dist/adapters/http/index.js"
+    },
+    "./adapters/ai": {
+      "types": "./dist/adapters/ai/index.d.ts",
+      "import": "./dist/adapters/ai/index.js",
+      "default": "./dist/adapters/ai/index.js"
+    },
+    "./testkit": {
+      "types": "./dist/testkit/index.d.ts",
+      "import": "./dist/testkit/index.js",
+      "default": "./dist/testkit/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "migrations",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "ai": "^7.0.0",
+    "zod": "^3.24.0"
+  },
+  "peerDependencies": {
+    "pg": "^8.11.0",
+    "react": ">=18",
+    "react-dom": ">=18"
+  },
+  "peerDependenciesMeta": {
+    "pg": {
+      "optional": true
+    },
+    "react": {
+      "optional": true
+    },
+    "react-dom": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@types/pg": "^8.11.0",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "esbuild": "^0.28.2",
+    "pg": "^8.23.0",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "typescript": "^5",
+    "vitest": "^4.1.11"
+  }
+}
