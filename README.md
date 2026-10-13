@@ -56,6 +56,7 @@ The package is strictly modularized with zero leakage of server/database code in
 | `interaction-builder/client` | Browser | Reactive external store, HTTP transport, and SSE stream parser. |
 | `interaction-builder/react` | React (Browser) | `<InteractionProvider>`, `useWorkspaceView`, `useWorkspaceRevision`, `useSendMessage`, `useDispatchAction`. |
 | `interaction-builder/adapters/pg` | Server (Node.js) | Pure PostgreSQL repository using native `pg.Pool` without ORM dependencies. |
+| `interaction-builder/adapters/sqlite` | Server / Edge / Local | Universal SQLite / LibSQL repository for local dev, desktop, Turso, Cloudflare D1. |
 | `interaction-builder/adapters/http` | Server (Web) | Web Fetch standard `Request` / `Response` dispatcher for Next.js, Express, or Fastify. |
 | `interaction-builder/adapters/ai` | Server | Vercel AI SDK adapter (`createAiSdkModelAdapter`) with error boundaries and abort signaling. |
 | `interaction-builder/testkit` | Tests | `MemoryInteractionRepository`, scripted mock models, and reference domain fixtures. |

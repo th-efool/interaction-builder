@@ -34,7 +34,7 @@ The provider automatically connects to `/api/interaction/v1/workspaces/:id` and 
 
 ### Reading Workspace State
 ```tsx
-import { useWorkspaceView, useWorkspaceRevision } from 'interaction-builder/react';
+import { useWorkspaceView, useWorkspaceRevision, useInteractionSelector } from 'interaction-builder/react';
 
 function Header() {
   const data = useWorkspaceView<MyDomainState>();
@@ -46,6 +46,15 @@ function Header() {
       <span>Revision: {revision}</span>
     </div>
   );
+}
+
+// High-performance selective subscriber (prevents re-renders if unrelated slice changes)
+function ItemCount() {
+  const count = useInteractionSelector<MyDomainState, number>(
+    state => state.items.length,
+    (a, b) => a === b
+  );
+  return <div>Items: {count}</div>;
 }
 ```
 

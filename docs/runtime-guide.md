@@ -26,6 +26,33 @@ const result = planActionCommit({
 
 If `envelope.expectedRevision !== currentRevision`, `planActionCommit` immediately throws `STALE_WORKSPACE` before mutating state.
 
+### Batch Action Commit (`planBatchActionCommit`)
+Executes multiple domain actions atomically in a single pass:
+```ts
+import { planBatchActionCommit } from 'interaction-builder/runtime';
+
+const result = planBatchActionCommit({
+  state: currentSnapshot,
+  currentRevision: workspace.revision,
+  envelopes: [envelope1, envelope2],
+  plan: domain.plan,
+});
+// Advances revision once per action, returns final state and array of receipts
+```
+
+### Telemetry & Observability (`InteractionTelemetryPort`)
+Pass pluggable OpenTelemetry hooks into action and turn lifecycles:
+```ts
+import { createCompositeTelemetry, type InteractionTelemetryPort } from 'interaction-builder/runtime';
+
+const otelPort: InteractionTelemetryPort = {
+  onActionStart: (e) => console.log('Action started:', e.actionType),
+  onActionEnd: (e) => console.log('Action ended in ms:', e.durationMs, 'success:', e.success),
+  onTurnStart: (e) => console.log('Turn started:', e.runId),
+  onTurnEnd: (e) => console.log('Turn ended in ms:', e.durationMs),
+};
+```
+
 ---
 
 ## 2. Interaction Repository (`InteractionRepository`)

@@ -28,10 +28,40 @@ const repo = createPgInteractionRepository({ pool });
 - Row locking with `FOR UPDATE SKIP LOCKED` for worker lease acquisition.
 - Token-based fence verification on mutations.
 - Monotonic revision check in single database transaction.
+- Health check verification via `repo.checkHealth()`.
 
 ---
 
-## 2. AI SDK Model Adapter (`interaction-builder/adapters/ai`)
+## 2. Universal SQLite / LibSQL Adapter (`interaction-builder/adapters/sqlite`)
+
+A zero-setup, zero-dependency embedded database repository for local development, desktop apps, offline agents, and edge deployments (Cloudflare D1 / Turso).
+
+### Setup
+```ts
+import { createSqliteInteractionRepository } from 'interaction-builder/adapters/sqlite';
+import Database from 'better-sqlite3';
+
+const db = new Database('./interaction.db');
+const repo = createSqliteInteractionRepository(db);
+
+// Automatically creates tables on first access
+const ws = await repo.createWorkspace({
+  id: crypto.randomUUID(),
+  ownerId: 'user-1',
+  domainId: 'doc',
+  domainVersion: 1,
+  initialSnapshot: { title: 'Local Note' },
+});
+```
+
+### Supported Drivers
+- `better-sqlite3` (Node.js)
+- `@libsql/client` / Turso
+- In-memory mock driver for portable unit tests
+
+---
+
+## 3. AI SDK Model Adapter (`interaction-builder/adapters/ai`)
 
 Bridges Vercel's AI SDK (`ai`) to the provider-agnostic `InteractionModelAdapter` interface used by the generic runner.
 
@@ -51,7 +81,7 @@ const modelAdapter = createAiSdkModelAdapter(
 
 ---
 
-## 3. Web HTTP Adapter (`interaction-builder/adapters/http`)
+## 4. Web HTTP Adapter (`interaction-builder/adapters/http`)
 
 Dispatches REST API endpoints using standard Web `Request` and `Response` objects. Compatible with Next.js App Router, Cloudflare Workers, Express (with fetch adapter), and Fastify.
 
