@@ -193,6 +193,9 @@ function createInteractionStore(opts) {
   const { workspaceId, transport } = opts;
   const newId = opts.newId ?? (() => crypto.randomUUID());
   const reconnectDelay = opts.reconnectDelayMs ?? 500;
+  const maxReconnectDelay = opts.maxReconnectDelayMs ?? 1e4;
+  const backoffMultiplier = opts.backoffMultiplier ?? 1.5;
+  const withJitter = opts.jitter ?? true;
   let state = {
     workspaceId,
     revision: 0,
@@ -209,6 +212,7 @@ function createInteractionStore(opts) {
   let stopped = false;
   let resnapshotting = null;
   let timer = null;
+  let reconnectAttempts = 0;
   const set = (next) => {
     state = next;
     subs.forEach((f) => f());
@@ -238,6 +242,7 @@ function createInteractionStore(opts) {
     closeStream = transport.openEvents(state.sequence, onServerEvent, onStreamClose);
   }
   function onServerEvent(event) {
+    reconnectAttempts = 0;
     const before = state;
     apply({ kind: "server", event });
     if (state.connection === "reset_required") {
@@ -253,9 +258,14 @@ function createInteractionStore(opts) {
   function scheduleReopen() {
     if (stopped) return;
     apply({ kind: "connection", value: "reconnecting" });
+    const base = reconnectDelay * Math.pow(backoffMultiplier, reconnectAttempts);
+    const capped = Math.min(maxReconnectDelay, base);
+    const jitterFactor = withJitter ? 1 + (Math.random() * 0.3 - 0.15) : 1;
+    const finalDelay = Math.max(1, Math.round(capped * jitterFactor));
+    reconnectAttempts++;
     timer = setTimeout(() => {
       void resnapshot().catch(() => void 0).finally(open);
-    }, reconnectDelay);
+    }, finalDelay);
   }
   function onStreamClose() {
     if (!stopped) scheduleReopen();
@@ -268,6 +278,7 @@ function createInteractionStore(opts) {
     },
     async connect() {
       stopped = false;
+      reconnectAttempts = 0;
       const s = await transport.getWorkspace();
       viewRevision = s.revision;
       apply({

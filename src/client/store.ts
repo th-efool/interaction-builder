@@ -48,16 +48,25 @@ export interface InteractionStore<View> {
   runAssistant(): Promise<boolean>;
 }
 
-export function createInteractionStore<View>(opts: {
+export interface InteractionStoreOptions<View> {
   workspaceId: string;
   initialView: View;
   transport: InteractionTransport<View>;
   newId?: () => string;
   reconnectDelayMs?: number;
-}): InteractionStore<View> {
+  maxReconnectDelayMs?: number;
+  backoffMultiplier?: number;
+  jitter?: boolean;
+}
+
+export function createInteractionStore<View>(opts: InteractionStoreOptions<View>): InteractionStore<View> {
   const { workspaceId, transport } = opts;
   const newId = opts.newId ?? (() => crypto.randomUUID());
   const reconnectDelay = opts.reconnectDelayMs ?? 500;
+  const maxReconnectDelay = opts.maxReconnectDelayMs ?? 10000;
+  const backoffMultiplier = opts.backoffMultiplier ?? 1.5;
+  const withJitter = opts.jitter ?? true;
+
   let state: StoreState<View> = {
     workspaceId,
     revision: 0,
@@ -74,6 +83,7 @@ export function createInteractionStore<View>(opts: {
   let stopped = false;
   let resnapshotting: Promise<void> | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
+  let reconnectAttempts = 0;
 
   const set = (next: StoreState<View>) => {
     state = next;
@@ -111,6 +121,7 @@ export function createInteractionStore<View>(opts: {
   }
 
   function onServerEvent(event: unknown) {
+    reconnectAttempts = 0;
     const before = state;
     apply({ kind: 'server', event });
     if (state.connection === 'reset_required') {
@@ -136,11 +147,17 @@ export function createInteractionStore<View>(opts: {
   function scheduleReopen() {
     if (stopped) return;
     apply({ kind: 'connection', value: 'reconnecting' });
+    const base = reconnectDelay * Math.pow(backoffMultiplier, reconnectAttempts);
+    const capped = Math.min(maxReconnectDelay, base);
+    const jitterFactor = withJitter ? 1 + (Math.random() * 0.3 - 0.15) : 1;
+    const finalDelay = Math.max(1, Math.round(capped * jitterFactor));
+    reconnectAttempts++;
+
     timer = setTimeout(() => {
       void resnapshot()
         .catch(() => undefined)
         .finally(open);
-    }, reconnectDelay);
+    }, finalDelay);
   }
 
   function onStreamClose() {
@@ -155,6 +172,7 @@ export function createInteractionStore<View>(opts: {
     },
     async connect() {
       stopped = false;
+      reconnectAttempts = 0;
       const s = await transport.getWorkspace();
       viewRevision = s.revision;
       apply({

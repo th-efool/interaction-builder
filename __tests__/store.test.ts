@@ -244,4 +244,32 @@ describe('interaction store', () => {
     storeTab2.disconnect();
     storeTab2Stale.disconnect();
   });
+
+  it('exponential backoff increases delays on consecutive reconnect attempts', async () => {
+    const f = fake({ revision: 0, cursor: 0, v: { intent: 'a' } });
+    const s = createInteractionStore<V>({
+      workspaceId: WS,
+      initialView: { intent: '' },
+      transport: f.t,
+      reconnectDelayMs: 10,
+      backoffMultiplier: 2,
+      jitter: false,
+    });
+    await s.connect();
+    expect(f.opened.length).toBe(1);
+
+    // Trigger first reconnect: delay is 10ms
+    f.end();
+    expect(s.getState().connection).toBe('reconnecting');
+    await new Promise(r => setTimeout(r, 25));
+    expect(f.opened.length).toBe(2);
+
+    // Trigger second reconnect: delay is 10 * 2 = 20ms
+    f.end();
+    expect(s.getState().connection).toBe('reconnecting');
+    await new Promise(r => setTimeout(r, 35));
+    expect(f.opened.length).toBe(3);
+
+    s.disconnect();
+  });
 });

@@ -63,11 +63,15 @@ export interface InteractionStore<View> {
     sendMessage(parts: unknown[]): Promise<boolean>;
     runAssistant(): Promise<boolean>;
 }
-export declare function createInteractionStore<View>(opts: {
+export interface InteractionStoreOptions<View> {
     workspaceId: string;
     initialView: View;
     transport: InteractionTransport<View>;
     newId?: () => string;
     reconnectDelayMs?: number;
-}): InteractionStore<View>;
+    maxReconnectDelayMs?: number;
+    backoffMultiplier?: number;
+    jitter?: boolean;
+}
+export declare function createInteractionStore<View>(opts: InteractionStoreOptions<View>): InteractionStore<View>;
 //# sourceMappingURL=store.d.ts.map
