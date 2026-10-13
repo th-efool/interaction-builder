@@ -8,7 +8,21 @@ export declare const agendaItemSchema: z.ZodObject<{
     durationMinutes: z.ZodNumber;
     presenter: z.ZodString;
     pinned: z.ZodBoolean;
-}, z.core.$strict>;
+}, "strict", z.ZodTypeAny, {
+    id: string;
+    version: number;
+    title: string;
+    durationMinutes: number;
+    presenter: string;
+    pinned: boolean;
+}, {
+    id: string;
+    version: number;
+    title: string;
+    durationMinutes: number;
+    presenter: string;
+    pinned: boolean;
+}>;
 export type AgendaItem = z.infer<typeof agendaItemSchema>;
 export declare const agendaWorkspaceSchema: z.ZodObject<{
     schemaVersion: z.ZodLiteral<1>;
@@ -21,25 +35,93 @@ export declare const agendaWorkspaceSchema: z.ZodObject<{
         durationMinutes: z.ZodNumber;
         presenter: z.ZodString;
         pinned: z.ZodBoolean;
-    }, z.core.$strict>>;
-}, z.core.$strict>;
+    }, "strict", z.ZodTypeAny, {
+        id: string;
+        version: number;
+        title: string;
+        durationMinutes: number;
+        presenter: string;
+        pinned: boolean;
+    }, {
+        id: string;
+        version: number;
+        title: string;
+        durationMinutes: number;
+        presenter: string;
+        pinned: boolean;
+    }>, "many">;
+}, "strict", z.ZodTypeAny, {
+    date: string;
+    schemaVersion: 1;
+    meetingTitle: string;
+    items: {
+        id: string;
+        version: number;
+        title: string;
+        durationMinutes: number;
+        presenter: string;
+        pinned: boolean;
+    }[];
+}, {
+    date: string;
+    schemaVersion: 1;
+    meetingTitle: string;
+    items: {
+        id: string;
+        version: number;
+        title: string;
+        durationMinutes: number;
+        presenter: string;
+        pinned: boolean;
+    }[];
+}>;
 export type AgendaWorkspace = z.infer<typeof agendaWorkspaceSchema>;
-export declare const agendaActionSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
+export declare const agendaActionSchema: z.ZodDiscriminatedUnion<"type", [z.ZodObject<{
     type: z.ZodLiteral<"set_meeting_title">;
     title: z.ZodString;
-}, z.core.$strict>, z.ZodObject<{
+}, "strict", z.ZodTypeAny, {
+    type: "set_meeting_title";
+    title: string;
+}, {
+    type: "set_meeting_title";
+    title: string;
+}>, z.ZodObject<{
     type: z.ZodLiteral<"edit_item">;
     itemId: z.ZodString;
     title: z.ZodOptional<z.ZodString>;
     durationMinutes: z.ZodOptional<z.ZodNumber>;
-}, z.core.$strict>, z.ZodObject<{
+}, "strict", z.ZodTypeAny, {
+    type: "edit_item";
+    itemId: string;
+    title?: string | undefined;
+    durationMinutes?: number | undefined;
+}, {
+    type: "edit_item";
+    itemId: string;
+    title?: string | undefined;
+    durationMinutes?: number | undefined;
+}>, z.ZodObject<{
     type: z.ZodLiteral<"set_item_pin">;
     itemId: z.ZodString;
     pinned: z.ZodBoolean;
-}, z.core.$strict>, z.ZodObject<{
+}, "strict", z.ZodTypeAny, {
+    type: "set_item_pin";
+    pinned: boolean;
+    itemId: string;
+}, {
+    type: "set_item_pin";
+    pinned: boolean;
+    itemId: string;
+}>, z.ZodObject<{
     type: z.ZodLiteral<"reorder_items">;
-    itemIds: z.ZodArray<z.ZodString>;
-}, z.core.$strict>], "type">;
+    itemIds: z.ZodArray<z.ZodString, "many">;
+}, "strict", z.ZodTypeAny, {
+    type: "reorder_items";
+    itemIds: string[];
+}, {
+    type: "reorder_items";
+    itemIds: string[];
+}>]>;
 export type AgendaAction = z.infer<typeof agendaActionSchema>;
 export interface AgendaActionContext {
     actionId: string;

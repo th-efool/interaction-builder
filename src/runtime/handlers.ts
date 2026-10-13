@@ -87,7 +87,8 @@ const ERROR_STATUS: Record<string, number> = {
 /** Maps thrown errors to the public envelope; never leaks raw messages. */
 export function toErrorResult(err: unknown, correlationId = crypto.randomUUID()): HandlerResult {
   const code = err instanceof Error ? err.message : 'INTERNAL';
-  if (err instanceof z.ZodError) {
+  // A host domain may use a different Zod major than this package.
+  if (err instanceof z.ZodError || (err instanceof Error && err.name === 'ZodError' && Array.isArray((err as { issues?: unknown }).issues))) {
     return {
       status: 400,
       body: { code: 'INVALID_ACTION', message: 'Invalid request', retryable: false, correlationId },

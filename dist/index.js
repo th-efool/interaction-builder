@@ -185,7 +185,7 @@ var ERROR_STATUS = {
 };
 function toErrorResult(err, correlationId = crypto.randomUUID()) {
   const code = err instanceof Error ? err.message : "INTERNAL";
-  if (err instanceof z2.ZodError) {
+  if (err instanceof z2.ZodError || err instanceof Error && err.name === "ZodError" && Array.isArray(err.issues)) {
     return {
       status: 400,
       body: { code: "INVALID_ACTION", message: "Invalid request", retryable: false, correlationId }

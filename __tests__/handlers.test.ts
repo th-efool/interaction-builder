@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { MemoryInteractionRepository } from '../src/runtime/memory.repository';
-import { createInteractionHandlers } from '../src/runtime/handlers';
+import { createInteractionHandlers, toErrorResult } from '../src/runtime/handlers';
 import { agendaDomain, sampleAgenda, type AgendaWorkspace } from '../src/testkit/agenda-domain';
 
 const WS = '4f828a1c-3b09-42b7-8738-4e50257ad42f';
@@ -19,6 +19,10 @@ const env = (rev: number, action: unknown) => ({
 });
 
 describe('interaction handlers', () => {
+  it('maps validation errors from a host Zod version to a bad request', () => {
+    const foreignZodError = Object.assign(new Error('invalid'), { name: 'ZodError', issues: [{ path: [], message: 'invalid' }] });
+    expect(toErrorResult(foreignZodError).status).toBe(400);
+  });
   it('create → get → action → events, owner isolated', async () => {
     const h = mk();
     expect(
