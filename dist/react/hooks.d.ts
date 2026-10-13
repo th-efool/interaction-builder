@@ -1,6 +1,11 @@
 import type { StoreState } from '../client/store';
 import type { EntityRef } from '../core/contracts';
 export declare function useInteractionState<View = unknown>(): StoreState<View>;
+/**
+ * Selective subscription hook to prevent unnecessary re-renders.
+ * Re-renders only when the selected slice of domain state changes.
+ */
+export declare function useInteractionSelector<View = unknown, Selected = unknown>(selector: (view: View) => Selected, isEqual?: (a: Selected, b: Selected) => boolean): Selected;
 export declare function useWorkspaceView<View = unknown>(): View;
 export declare function useWorkspaceMessages(): {
     id: string;

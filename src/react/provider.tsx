@@ -7,9 +7,10 @@ import {
 import { createHttpTransport } from '../client/transport';
 
 export interface InteractionProviderProps<View> {
-  workspaceId: string;
-  initialView: View;
+  workspaceId?: string;
+  initialView?: View;
   transport?: InteractionTransport<View>;
+  store?: InteractionStore<View>;
   children: React.ReactNode;
 }
 
@@ -19,19 +20,25 @@ export function InteractionProvider<View>({
   workspaceId,
   initialView,
   transport,
+  store: externalStore,
   children,
 }: InteractionProviderProps<View>) {
   const effectiveTransport = useMemo(() => {
-    return transport ?? createHttpTransport<View>({ workspaceId });
-  }, [transport, workspaceId]);
+    if (externalStore) return undefined as any;
+    return transport ?? createHttpTransport<View>({ workspaceId: workspaceId! });
+  }, [transport, workspaceId, externalStore]);
 
-  const store = useMemo(() => {
+  const internalStore = useMemo(() => {
+    if (externalStore) return externalStore;
+    if (!workspaceId) throw new Error('InteractionProvider requires either "store" or "workspaceId" and "initialView"');
     return createInteractionStore<View>({
       workspaceId,
-      initialView,
+      initialView: initialView as View,
       transport: effectiveTransport,
     });
-  }, [workspaceId, initialView, effectiveTransport]);
+  }, [externalStore, workspaceId, initialView, effectiveTransport]);
+
+  const store = externalStore ?? internalStore;
 
   const connectedRef = useRef(false);
 

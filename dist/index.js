@@ -52,6 +52,121 @@ var actionEnvelopeSchema = z.strictObject({
   action: z.unknown()
 });
 
+// src/core/patch.ts
+function escapeJsonPointer(str) {
+  return str.replace(/~/g, "~0").replace(/\//g, "~1");
+}
+function unescapeJsonPointer(str) {
+  return str.replace(/~1/g, "/").replace(/~0/g, "~");
+}
+function parsePointer(path) {
+  if (path === "") return [];
+  if (!path.startsWith("/")) throw new Error(`Invalid JSON Pointer: "${path}"`);
+  return path.slice(1).split("/").map(unescapeJsonPointer);
+}
+function applyJsonPatch(doc, patch) {
+  let root = structuredClone(doc);
+  for (const op of patch) {
+    const tokens = parsePointer(op.path);
+    if (tokens.length === 0) {
+      if (op.op === "replace" || op.op === "add") {
+        root = structuredClone(op.value);
+        continue;
+      }
+      throw new Error(`Cannot perform op "${op.op}" on document root`);
+    }
+    let parent = root;
+    for (let i = 0; i < tokens.length - 1; i++) {
+      const key = tokens[i];
+      if (parent === null || typeof parent !== "object") {
+        throw new Error(`Cannot traverse path "${op.path}"`);
+      }
+      parent = parent[key];
+    }
+    const lastKey = tokens[tokens.length - 1];
+    if (op.op === "add") {
+      if (Array.isArray(parent)) {
+        const index = lastKey === "-" ? parent.length : Number(lastKey);
+        if (!Number.isInteger(index) || index < 0 || index > parent.length) {
+          throw new Error(`Invalid array index "${lastKey}" for add`);
+        }
+        parent.splice(index, 0, structuredClone(op.value));
+      } else if (parent && typeof parent === "object") {
+        parent[lastKey] = structuredClone(op.value);
+      } else {
+        throw new Error(`Cannot add to non-object parent at "${op.path}"`);
+      }
+    } else if (op.op === "replace") {
+      if (Array.isArray(parent)) {
+        const index = Number(lastKey);
+        if (!Number.isInteger(index) || index < 0 || index >= parent.length) {
+          throw new Error(`Invalid array index "${lastKey}" for replace`);
+        }
+        parent[index] = structuredClone(op.value);
+      } else if (parent && typeof parent === "object") {
+        if (!(lastKey in parent)) throw new Error(`Property "${lastKey}" not found for replace`);
+        parent[lastKey] = structuredClone(op.value);
+      }
+    } else if (op.op === "remove") {
+      if (Array.isArray(parent)) {
+        const index = Number(lastKey);
+        if (!Number.isInteger(index) || index < 0 || index >= parent.length) {
+          throw new Error(`Invalid array index "${lastKey}" for remove`);
+        }
+        parent.splice(index, 1);
+      } else if (parent && typeof parent === "object") {
+        if (!(lastKey in parent)) throw new Error(`Property "${lastKey}" not found for remove`);
+        delete parent[lastKey];
+      }
+    } else if (op.op === "test") {
+      const actual = parent?.[lastKey];
+      if (JSON.stringify(actual) !== JSON.stringify(op.value)) {
+        throw new Error(`Test operation failed at "${op.path}"`);
+      }
+    } else {
+      throw new Error(`Unsupported JSON Patch operation: "${op.op}"`);
+    }
+  }
+  return root;
+}
+function generateJsonPatch(prev, next, basePath = "") {
+  const patch = [];
+  if (prev === next) return patch;
+  if (prev === null || next === null || typeof prev !== "object" || typeof next !== "object" || Array.isArray(prev) !== Array.isArray(next)) {
+    patch.push({ op: "replace", path: basePath || "/", value: next });
+    return patch;
+  }
+  if (Array.isArray(prev) && Array.isArray(next)) {
+    if (prev.length === next.length) {
+      for (let i = 0; i < prev.length; i++) {
+        const itemPath = `${basePath}/${i}`;
+        patch.push(...generateJsonPatch(prev[i], next[i], itemPath));
+      }
+    } else {
+      patch.push({ op: "replace", path: basePath || "/", value: next });
+    }
+    return patch;
+  }
+  const prevObj = prev;
+  const nextObj = next;
+  const prevKeys = Object.keys(prevObj);
+  const nextKeys = Object.keys(nextObj);
+  for (const k of prevKeys) {
+    if (!(k in nextObj)) {
+      patch.push({ op: "remove", path: `${basePath}/${escapeJsonPointer(k)}` });
+    }
+  }
+  for (const k of nextKeys) {
+    const keyPath = `${basePath}/${escapeJsonPointer(k)}`;
+    if (!(k in prevObj)) {
+      patch.push({ op: "add", path: keyPath, value: nextObj[k] });
+    } else {
+      patch.push(...generateJsonPatch(prevObj[k], nextObj[k], keyPath));
+    }
+  }
+  return patch;
+}
+
 // src/core/reducer.ts
 function reduceInteraction(state, input) {
   if (input.kind === "snapshot") {
@@ -88,6 +203,17 @@ function reduceInteraction(state, input) {
     return { ...state, sequence: event.sequence, messages };
   }
   if (event.type === "workspace.committed" && event.revision !== void 0) {
+    const payload = event.payload;
+    if (payload?.patch && state.view) {
+      try {
+        const nextView = applyJsonPatch(state.view, payload.patch);
+        return { ...state, sequence: event.sequence, revision: event.revision, view: nextView };
+      } catch {
+      }
+    }
+    if (payload?.snapshot !== void 0) {
+      return { ...state, sequence: event.sequence, revision: event.revision, view: payload.snapshot };
+    }
     return { ...state, sequence: event.sequence, revision: event.revision };
   }
   return { ...state, sequence: event.sequence };
@@ -137,6 +263,26 @@ function planActionCommit(input) {
     undoable: result.undoable
   });
   return { state: result.nextState, revision, receipt };
+}
+function planBatchActionCommit(input) {
+  if (!Array.isArray(input.envelopes) || input.envelopes.length === 0) {
+    return { state: input.state, revision: input.currentRevision, receipts: [] };
+  }
+  let currentState = input.state;
+  let rev = input.currentRevision;
+  const receipts = [];
+  for (const rawEnvelope of input.envelopes) {
+    const res = planActionCommit({
+      state: currentState,
+      currentRevision: rev,
+      envelope: rawEnvelope,
+      plan: input.plan
+    });
+    currentState = res.state;
+    rev = res.revision;
+    receipts.push(res.receipt);
+  }
+  return { state: currentState, revision: rev, receipts };
 }
 
 // src/runtime/handlers.ts
@@ -406,6 +552,7 @@ function createInteractionHandlers(deps) {
 
 // src/runtime/runner.ts
 async function runAssistantTurn(opts) {
+  if (opts.signal?.aborted) throw new Error("RUN_ABORTED");
   const { workspaceId, ownerId, repo, domain, model, runId, leaseToken } = opts;
   const ws = await repo.loadWorkspace({ workspaceId, ownerId });
   if (!ws) throw new Error("WORKSPACE_NOT_FOUND");
@@ -1610,6 +1757,7 @@ export {
   MemoryInteractionRepository,
   TransportError,
   actionEnvelopeSchema,
+  applyJsonPatch,
   changeReceiptSchema,
   computePayloadHash,
   createHttpTransport,
@@ -1618,11 +1766,13 @@ export {
   createMemoryInteractionRepository,
   deterministicUuid,
   entityRefSchema,
+  generateJsonPatch,
   interactionEventSchema,
   interactionMessageSchema,
   messagePartSchema,
   parseSseStream,
   planActionCommit,
+  planBatchActionCommit,
   reduceInteraction,
   runAssistantTurn,
   streamEvents,

@@ -1,6 +1,6 @@
 // src/adapters/ai/index.ts
-import { generateText, stepCountIs } from "ai";
-function createAiSdkModelAdapter(model) {
+import { generateText, streamText, stepCountIs } from "ai";
+function createAiSdkModelAdapter(model, options) {
   return {
     async executeTurn(input) {
       const messages = input.messages.map((m) => ({
@@ -16,8 +16,11 @@ function createAiSdkModelAdapter(model) {
           wrappedTools[name] = {
             ...t,
             execute: async (args, context) => {
+              options?.onToolCallStart?.(name, context?.toolCallId);
               try {
-                return await origExecute(args, context);
+                const out = await origExecute(args, context);
+                options?.onToolCallEnd?.(name, context?.toolCallId);
+                return out;
               } catch (err) {
                 fatalToolError = err;
                 ac.abort(err);
@@ -27,6 +30,31 @@ function createAiSdkModelAdapter(model) {
           };
         } else {
           wrappedTools[name] = t;
+        }
+      }
+      if (options?.streaming && options?.onChunk) {
+        try {
+          const streamResult = streamText({
+            model,
+            system: input.systemPrompt,
+            messages,
+            tools: wrappedTools,
+            abortSignal: ac.signal,
+            stopWhen: stepCountIs(input.maxSteps ?? 5)
+          });
+          for await (const chunk of streamResult.textStream) {
+            options.onChunk(chunk);
+          }
+          const fullText = await streamResult.text;
+          const steps = await streamResult.steps;
+          if (fatalToolError) throw fatalToolError;
+          return {
+            text: fullText,
+            stepsCount: steps?.length ?? 1
+          };
+        } catch (err) {
+          if (fatalToolError) throw fatalToolError;
+          throw err;
         }
       }
       let result;

@@ -44,6 +44,7 @@ export interface AssistantRunOptions<State = unknown> {
     observedRevision?: number;
     maxSteps?: number;
     systemPrompt?: string;
+    signal?: AbortSignal;
 }
 export interface AssistantRunResult {
     success: boolean;

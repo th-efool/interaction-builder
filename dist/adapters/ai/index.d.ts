@@ -1,5 +1,11 @@
 import { type LanguageModel } from 'ai';
 import type { InteractionModelAdapter } from '../../runtime/runner';
-export declare function createAiSdkModelAdapter(model: LanguageModel): InteractionModelAdapter;
+export interface AiSdkAdapterOptions {
+    streaming?: boolean;
+    onChunk?: (text: string) => void;
+    onToolCallStart?: (toolName: string, callId?: string) => void;
+    onToolCallEnd?: (toolName: string, callId?: string) => void;
+}
+export declare function createAiSdkModelAdapter(model: LanguageModel, options?: AiSdkAdapterOptions): InteractionModelAdapter;
 export type { LanguageModel };
 //# sourceMappingURL=index.d.ts.map

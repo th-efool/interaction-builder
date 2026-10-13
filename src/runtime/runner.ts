@@ -52,6 +52,7 @@ export interface AssistantRunOptions<State = unknown> {
   observedRevision?: number;
   maxSteps?: number;
   systemPrompt?: string;
+  signal?: AbortSignal;
 }
 
 export interface AssistantRunResult {
@@ -65,6 +66,7 @@ export interface AssistantRunResult {
 export async function runAssistantTurn<State>(
   opts: AssistantRunOptions<State>
 ): Promise<AssistantRunResult> {
+  if (opts.signal?.aborted) throw new Error('RUN_ABORTED');
   const { workspaceId, ownerId, repo, domain, model, runId, leaseToken } = opts;
 
   const ws = await repo.loadWorkspace<State>({ workspaceId, ownerId });

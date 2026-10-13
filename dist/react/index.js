@@ -56,6 +56,81 @@ var actionEnvelopeSchema = z.strictObject({
   action: z.unknown()
 });
 
+// src/core/patch.ts
+function unescapeJsonPointer(str) {
+  return str.replace(/~1/g, "/").replace(/~0/g, "~");
+}
+function parsePointer(path) {
+  if (path === "") return [];
+  if (!path.startsWith("/")) throw new Error(`Invalid JSON Pointer: "${path}"`);
+  return path.slice(1).split("/").map(unescapeJsonPointer);
+}
+function applyJsonPatch(doc, patch) {
+  let root = structuredClone(doc);
+  for (const op of patch) {
+    const tokens = parsePointer(op.path);
+    if (tokens.length === 0) {
+      if (op.op === "replace" || op.op === "add") {
+        root = structuredClone(op.value);
+        continue;
+      }
+      throw new Error(`Cannot perform op "${op.op}" on document root`);
+    }
+    let parent = root;
+    for (let i = 0; i < tokens.length - 1; i++) {
+      const key = tokens[i];
+      if (parent === null || typeof parent !== "object") {
+        throw new Error(`Cannot traverse path "${op.path}"`);
+      }
+      parent = parent[key];
+    }
+    const lastKey = tokens[tokens.length - 1];
+    if (op.op === "add") {
+      if (Array.isArray(parent)) {
+        const index = lastKey === "-" ? parent.length : Number(lastKey);
+        if (!Number.isInteger(index) || index < 0 || index > parent.length) {
+          throw new Error(`Invalid array index "${lastKey}" for add`);
+        }
+        parent.splice(index, 0, structuredClone(op.value));
+      } else if (parent && typeof parent === "object") {
+        parent[lastKey] = structuredClone(op.value);
+      } else {
+        throw new Error(`Cannot add to non-object parent at "${op.path}"`);
+      }
+    } else if (op.op === "replace") {
+      if (Array.isArray(parent)) {
+        const index = Number(lastKey);
+        if (!Number.isInteger(index) || index < 0 || index >= parent.length) {
+          throw new Error(`Invalid array index "${lastKey}" for replace`);
+        }
+        parent[index] = structuredClone(op.value);
+      } else if (parent && typeof parent === "object") {
+        if (!(lastKey in parent)) throw new Error(`Property "${lastKey}" not found for replace`);
+        parent[lastKey] = structuredClone(op.value);
+      }
+    } else if (op.op === "remove") {
+      if (Array.isArray(parent)) {
+        const index = Number(lastKey);
+        if (!Number.isInteger(index) || index < 0 || index >= parent.length) {
+          throw new Error(`Invalid array index "${lastKey}" for remove`);
+        }
+        parent.splice(index, 1);
+      } else if (parent && typeof parent === "object") {
+        if (!(lastKey in parent)) throw new Error(`Property "${lastKey}" not found for remove`);
+        delete parent[lastKey];
+      }
+    } else if (op.op === "test") {
+      const actual = parent?.[lastKey];
+      if (JSON.stringify(actual) !== JSON.stringify(op.value)) {
+        throw new Error(`Test operation failed at "${op.path}"`);
+      }
+    } else {
+      throw new Error(`Unsupported JSON Patch operation: "${op.op}"`);
+    }
+  }
+  return root;
+}
+
 // src/core/reducer.ts
 function reduceInteraction(state, input) {
   if (input.kind === "snapshot") {
@@ -92,6 +167,17 @@ function reduceInteraction(state, input) {
     return { ...state, sequence: event.sequence, messages };
   }
   if (event.type === "workspace.committed" && event.revision !== void 0) {
+    const payload = event.payload;
+    if (payload?.patch && state.view) {
+      try {
+        const nextView = applyJsonPatch(state.view, payload.patch);
+        return { ...state, sequence: event.sequence, revision: event.revision, view: nextView };
+      } catch {
+      }
+    }
+    if (payload?.snapshot !== void 0) {
+      return { ...state, sequence: event.sequence, revision: event.revision, view: payload.snapshot };
+    }
     return { ...state, sequence: event.sequence, revision: event.revision };
   }
   return { ...state, sequence: event.sequence };
@@ -428,18 +514,23 @@ function InteractionProvider({
   workspaceId,
   initialView,
   transport,
+  store: externalStore,
   children
 }) {
   const effectiveTransport = useMemo(() => {
+    if (externalStore) return void 0;
     return transport ?? createHttpTransport({ workspaceId });
-  }, [transport, workspaceId]);
-  const store = useMemo(() => {
+  }, [transport, workspaceId, externalStore]);
+  const internalStore = useMemo(() => {
+    if (externalStore) return externalStore;
+    if (!workspaceId) throw new Error('InteractionProvider requires either "store" or "workspaceId" and "initialView"');
     return createInteractionStore({
       workspaceId,
       initialView,
       transport: effectiveTransport
     });
-  }, [workspaceId, initialView, effectiveTransport]);
+  }, [externalStore, workspaceId, initialView, effectiveTransport]);
+  const store = externalStore ?? internalStore;
   const connectedRef = useRef(false);
   useEffect(() => {
     if (!connectedRef.current) {
@@ -462,13 +553,33 @@ function useInteractionStore() {
 }
 
 // src/react/hooks.ts
-import { useCallback, useSyncExternalStore } from "react";
+import { useCallback, useRef as useRef2, useSyncExternalStore } from "react";
 function useInteractionState() {
   const store = useInteractionStore();
   return useSyncExternalStore(
     store.subscribe,
     store.getState,
     store.getState
+  );
+}
+function useInteractionSelector(selector, isEqual = Object.is) {
+  const store = useInteractionStore();
+  const cacheRef = useRef2({
+    initialized: false,
+    value: void 0
+  });
+  const getSnapshot = useCallback(() => {
+    const nextValue = selector(store.getState().view);
+    if (cacheRef.current.initialized && cacheRef.current.value !== void 0 && isEqual(cacheRef.current.value, nextValue)) {
+      return cacheRef.current.value;
+    }
+    cacheRef.current = { initialized: true, value: nextValue };
+    return nextValue;
+  }, [store, selector, isEqual]);
+  return useSyncExternalStore(
+    store.subscribe,
+    getSnapshot,
+    getSnapshot
   );
 }
 function useWorkspaceView() {
@@ -524,6 +635,7 @@ export {
   InteractionContext,
   InteractionProvider,
   useDispatchAction,
+  useInteractionSelector,
   useInteractionState,
   useInteractionStore,
   useRunAssistant,

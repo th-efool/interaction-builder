@@ -1,4 +1,5 @@
 import { interactionEventSchema, type InteractionEvent, type InteractionMessage } from './contracts';
+import { applyJsonPatch, type JsonPatch } from './patch';
 
 export interface InteractionClientState<View = unknown> {
   workspaceId: string;
@@ -56,6 +57,18 @@ export function reduceInteraction<View>(
     return { ...state, sequence: event.sequence, messages };
   }
   if (event.type === 'workspace.committed' && event.revision !== undefined) {
+    const payload = event.payload as { snapshot?: View; patch?: import('./patch').JsonPatch } | undefined;
+    if (payload?.patch && state.view) {
+      try {
+        const nextView = applyJsonPatch(state.view, payload.patch);
+        return { ...state, sequence: event.sequence, revision: event.revision, view: nextView };
+      } catch {
+        // Fall back to snapshot if patch application fails
+      }
+    }
+    if (payload?.snapshot !== undefined) {
+      return { ...state, sequence: event.sequence, revision: event.revision, view: payload.snapshot };
+    }
     return { ...state, sequence: event.sequence, revision: event.revision };
   }
   return { ...state, sequence: event.sequence };

@@ -1,4 +1,4 @@
-import { useCallback, useSyncExternalStore } from 'react';
+import { useCallback, useRef, useSyncExternalStore } from 'react';
 import { useInteractionStore } from './provider';
 import type { StoreState } from '../client/store';
 import type { EntityRef } from '../core/contracts';
@@ -9,6 +9,40 @@ export function useInteractionState<View = unknown>(): StoreState<View> {
     store.subscribe,
     store.getState,
     store.getState
+  );
+}
+
+/**
+ * Selective subscription hook to prevent unnecessary re-renders.
+ * Re-renders only when the selected slice of domain state changes.
+ */
+export function useInteractionSelector<View = unknown, Selected = unknown>(
+  selector: (view: View) => Selected,
+  isEqual: (a: Selected, b: Selected) => boolean = Object.is
+): Selected {
+  const store = useInteractionStore<View>();
+  const cacheRef = useRef<{ initialized: boolean; value: Selected | undefined }>({
+    initialized: false,
+    value: undefined,
+  });
+
+  const getSnapshot = useCallback(() => {
+    const nextValue = selector(store.getState().view);
+    if (
+      cacheRef.current.initialized &&
+      cacheRef.current.value !== undefined &&
+      isEqual(cacheRef.current.value, nextValue)
+    ) {
+      return cacheRef.current.value;
+    }
+    cacheRef.current = { initialized: true, value: nextValue };
+    return nextValue;
+  }, [store, selector, isEqual]);
+
+  return useSyncExternalStore(
+    store.subscribe,
+    getSnapshot,
+    getSnapshot
   );
 }
 

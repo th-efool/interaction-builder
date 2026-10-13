@@ -97,6 +97,26 @@ function planActionCommit(input) {
   });
   return { state: result.nextState, revision, receipt };
 }
+function planBatchActionCommit(input) {
+  if (!Array.isArray(input.envelopes) || input.envelopes.length === 0) {
+    return { state: input.state, revision: input.currentRevision, receipts: [] };
+  }
+  let currentState = input.state;
+  let rev = input.currentRevision;
+  const receipts = [];
+  for (const rawEnvelope of input.envelopes) {
+    const res = planActionCommit({
+      state: currentState,
+      currentRevision: rev,
+      envelope: rawEnvelope,
+      plan: input.plan
+    });
+    currentState = res.state;
+    rev = res.revision;
+    receipts.push(res.receipt);
+  }
+  return { state: currentState, revision: rev, receipts };
+}
 
 // src/runtime/handlers.ts
 import { z as z2 } from "zod";
@@ -365,6 +385,7 @@ function createInteractionHandlers(deps) {
 
 // src/runtime/runner.ts
 async function runAssistantTurn(opts) {
+  if (opts.signal?.aborted) throw new Error("RUN_ABORTED");
   const { workspaceId, ownerId, repo, domain, model, runId, leaseToken } = opts;
   const ws = await repo.loadWorkspace({ workspaceId, ownerId });
   if (!ws) throw new Error("WORKSPACE_NOT_FOUND");
@@ -1248,6 +1269,7 @@ export {
   createMemoryInteractionRepository,
   deterministicUuid,
   planActionCommit,
+  planBatchActionCommit,
   runAssistantTurn,
   streamEvents,
   toErrorResult
