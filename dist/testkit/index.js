@@ -287,28 +287,56 @@ function computePayloadHash(payload) {
 
 // src/runtime/action.service.ts
 function planActionCommit(input) {
+  const startTime = Date.now();
   const envelope = actionEnvelopeSchema.parse(input.envelope);
-  if (envelope.expectedRevision !== input.currentRevision) {
-    throw new Error("STALE_WORKSPACE");
-  }
-  const entityVersions = new Map(envelope.entityVersions.map((item) => [item.id, item.version]));
-  const result = input.plan(input.state, envelope.action, {
-    actionId: envelope.actionId,
+  const actionType = typeof envelope.action?.type === "string" ? envelope.action.type : "action";
+  input.telemetry?.onActionStart?.({
     workspaceId: envelope.workspaceId,
-    expectedRevision: envelope.expectedRevision,
-    currentRevision: input.currentRevision,
-    entityVersions: input.entityVersions ?? entityVersions
-  });
-  const revision = input.currentRevision + 1;
-  const receipt = changeReceiptSchema.parse({
-    receiptId: crypto.randomUUID(),
     actionId: envelope.actionId,
-    revision,
-    summary: result.summary,
-    changed: result.changed,
-    undoable: result.undoable
+    actionType,
+    timestamp: startTime
   });
-  return { state: result.nextState, revision, receipt };
+  try {
+    if (envelope.expectedRevision !== input.currentRevision) {
+      throw new Error("STALE_WORKSPACE");
+    }
+    const entityVersions = new Map(envelope.entityVersions.map((item) => [item.id, item.version]));
+    const result = input.plan(input.state, envelope.action, {
+      actionId: envelope.actionId,
+      workspaceId: envelope.workspaceId,
+      expectedRevision: envelope.expectedRevision,
+      currentRevision: input.currentRevision,
+      entityVersions: input.entityVersions ?? entityVersions
+    });
+    const revision = input.currentRevision + 1;
+    const receipt = changeReceiptSchema.parse({
+      receiptId: crypto.randomUUID(),
+      actionId: envelope.actionId,
+      revision,
+      summary: result.summary,
+      changed: result.changed,
+      undoable: result.undoable
+    });
+    input.telemetry?.onActionEnd?.({
+      workspaceId: envelope.workspaceId,
+      actionId: envelope.actionId,
+      actionType,
+      durationMs: Date.now() - startTime,
+      success: true,
+      revision
+    });
+    return { state: result.nextState, revision, receipt };
+  } catch (err) {
+    input.telemetry?.onActionEnd?.({
+      workspaceId: envelope.workspaceId,
+      actionId: envelope.actionId,
+      actionType,
+      durationMs: Date.now() - startTime,
+      success: false,
+      error: err
+    });
+    throw err;
+  }
 }
 
 // src/runtime/memory.repository.ts

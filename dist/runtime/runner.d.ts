@@ -1,5 +1,6 @@
 import type { InteractionRepository } from './repository';
 import type { DomainDefinition } from './handlers';
+import type { InteractionTelemetryPort } from './telemetry';
 export interface InteractionModelMessage {
     role: 'user' | 'assistant' | 'system';
     content: string;
@@ -45,6 +46,7 @@ export interface AssistantRunOptions<State = unknown> {
     maxSteps?: number;
     systemPrompt?: string;
     signal?: AbortSignal;
+    telemetry?: InteractionTelemetryPort;
 }
 export interface AssistantRunResult {
     success: boolean;

@@ -51,6 +51,18 @@ var actionEnvelopeSchema = z.strictObject({
   entityVersions: z.array(entityRefSchema).max(100),
   action: z.unknown()
 });
+function defineAction(type, schema) {
+  return {
+    type,
+    schema,
+    create(payload) {
+      if (schema) {
+        schema.parse(payload);
+      }
+      return { type, ...payload };
+    }
+  };
+}
 
 // src/core/patch.ts
 function escapeJsonPointer(str) {
@@ -222,6 +234,7 @@ export {
   actionEnvelopeSchema,
   applyJsonPatch,
   changeReceiptSchema,
+  defineAction,
   entityRefSchema,
   generateJsonPatch,
   interactionEventSchema,

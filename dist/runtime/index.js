@@ -74,28 +74,56 @@ var actionEnvelopeSchema = z.strictObject({
 
 // src/runtime/action.service.ts
 function planActionCommit(input) {
+  const startTime = Date.now();
   const envelope = actionEnvelopeSchema.parse(input.envelope);
-  if (envelope.expectedRevision !== input.currentRevision) {
-    throw new Error("STALE_WORKSPACE");
-  }
-  const entityVersions = new Map(envelope.entityVersions.map((item) => [item.id, item.version]));
-  const result = input.plan(input.state, envelope.action, {
-    actionId: envelope.actionId,
+  const actionType = typeof envelope.action?.type === "string" ? envelope.action.type : "action";
+  input.telemetry?.onActionStart?.({
     workspaceId: envelope.workspaceId,
-    expectedRevision: envelope.expectedRevision,
-    currentRevision: input.currentRevision,
-    entityVersions: input.entityVersions ?? entityVersions
-  });
-  const revision = input.currentRevision + 1;
-  const receipt = changeReceiptSchema.parse({
-    receiptId: crypto.randomUUID(),
     actionId: envelope.actionId,
-    revision,
-    summary: result.summary,
-    changed: result.changed,
-    undoable: result.undoable
+    actionType,
+    timestamp: startTime
   });
-  return { state: result.nextState, revision, receipt };
+  try {
+    if (envelope.expectedRevision !== input.currentRevision) {
+      throw new Error("STALE_WORKSPACE");
+    }
+    const entityVersions = new Map(envelope.entityVersions.map((item) => [item.id, item.version]));
+    const result = input.plan(input.state, envelope.action, {
+      actionId: envelope.actionId,
+      workspaceId: envelope.workspaceId,
+      expectedRevision: envelope.expectedRevision,
+      currentRevision: input.currentRevision,
+      entityVersions: input.entityVersions ?? entityVersions
+    });
+    const revision = input.currentRevision + 1;
+    const receipt = changeReceiptSchema.parse({
+      receiptId: crypto.randomUUID(),
+      actionId: envelope.actionId,
+      revision,
+      summary: result.summary,
+      changed: result.changed,
+      undoable: result.undoable
+    });
+    input.telemetry?.onActionEnd?.({
+      workspaceId: envelope.workspaceId,
+      actionId: envelope.actionId,
+      actionType,
+      durationMs: Date.now() - startTime,
+      success: true,
+      revision
+    });
+    return { state: result.nextState, revision, receipt };
+  } catch (err) {
+    input.telemetry?.onActionEnd?.({
+      workspaceId: envelope.workspaceId,
+      actionId: envelope.actionId,
+      actionType,
+      durationMs: Date.now() - startTime,
+      success: false,
+      error: err
+    });
+    throw err;
+  }
 }
 function planBatchActionCommit(input) {
   if (!Array.isArray(input.envelopes) || input.envelopes.length === 0) {
@@ -109,7 +137,8 @@ function planBatchActionCommit(input) {
       state: currentState,
       currentRevision: rev,
       envelope: rawEnvelope,
-      plan: input.plan
+      plan: input.plan,
+      telemetry: input.telemetry
     });
     currentState = res.state;
     rev = res.revision;
@@ -387,6 +416,14 @@ function createInteractionHandlers(deps) {
 async function runAssistantTurn(opts) {
   if (opts.signal?.aborted) throw new Error("RUN_ABORTED");
   const { workspaceId, ownerId, repo, domain, model, runId, leaseToken } = opts;
+  const turnStartTime = Date.now();
+  if (runId && opts.telemetry) {
+    opts.telemetry.onTurnStart?.({
+      workspaceId,
+      runId,
+      timestamp: turnStartTime
+    });
+  }
   const ws = await repo.loadWorkspace({ workspaceId, ownerId });
   if (!ws) throw new Error("WORKSPACE_NOT_FOUND");
   if (ws.lifecycle !== "active") throw new Error("WORKSPACE_NOT_ACTIVE");
@@ -566,6 +603,15 @@ Instructions:
       });
     }
   } catch (err) {
+    if (runId && opts.telemetry) {
+      opts.telemetry.onTurnEnd?.({
+        workspaceId,
+        runId,
+        durationMs: Date.now() - turnStartTime,
+        success: false,
+        error: err
+      });
+    }
     if (runId && leaseToken) {
       await repo.recordStep({
         runId,
@@ -589,6 +635,15 @@ Instructions:
       role: "assistant",
       parts: [{ type: "text", text: responseText }],
       runId: runId ?? null
+    });
+  }
+  if (runId && opts.telemetry) {
+    opts.telemetry.onTurnEnd?.({
+      workspaceId,
+      runId,
+      durationMs: Date.now() - turnStartTime,
+      success: true,
+      stepsCount: result.stepsCount
     });
   }
   return {
@@ -1262,9 +1317,28 @@ async function streamEvents(h, ownerId, workspaceId, after, opts = {}) {
   });
   return new Response(stream, { status: 200, headers: SSE_HEADERS });
 }
+
+// src/runtime/telemetry.ts
+function createCompositeTelemetry(ports) {
+  return {
+    onActionStart(e) {
+      for (const p of ports) p.onActionStart?.(e);
+    },
+    onActionEnd(e) {
+      for (const p of ports) p.onActionEnd?.(e);
+    },
+    onTurnStart(e) {
+      for (const p of ports) p.onTurnStart?.(e);
+    },
+    onTurnEnd(e) {
+      for (const p of ports) p.onTurnEnd?.(e);
+    }
+  };
+}
 export {
   MemoryInteractionRepository,
   computePayloadHash,
+  createCompositeTelemetry,
   createInteractionHandlers,
   createMemoryInteractionRepository,
   deterministicUuid,

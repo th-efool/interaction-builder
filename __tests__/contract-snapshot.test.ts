@@ -7,6 +7,7 @@ import * as ReactLayer from '../src/react/index';
 import * as PgAdapter from '../src/adapters/pg/index';
 import * as HttpAdapter from '../src/adapters/http/index';
 import * as AiAdapter from '../src/adapters/ai/index';
+import * as SqliteAdapter from '../src/adapters/sqlite/index';
 import * as Testkit from '../src/testkit/index';
 
 describe('Authoritative Contract Snapshot & Zero-Breaking-Change Guarantee', () => {
@@ -22,6 +23,8 @@ describe('Authoritative Contract Snapshot & Zero-Breaking-Change Guarantee', () 
     expect(typeof Root.generateJsonPatch).toBe('function');
     expect(typeof Root.applyJsonPatch).toBe('function');
     expect(typeof Root.planBatchActionCommit).toBe('function');
+    expect(typeof Root.defineAction).toBe('function');
+    expect(typeof Root.createCompositeTelemetry).toBe('function');
   });
 
   it('freezes public Core export signatures', () => {
@@ -34,6 +37,7 @@ describe('Authoritative Contract Snapshot & Zero-Breaking-Change Guarantee', () 
     expect(typeof Core.reduceInteraction).toBe('function');
     expect(typeof Core.generateJsonPatch).toBe('function');
     expect(typeof Core.applyJsonPatch).toBe('function');
+    expect(typeof Core.defineAction).toBe('function');
 
     // Schema structure verification
     expect(Core.entityRefSchema.safeParse({ kind: 'lesson', id: 'l1', version: 1 }).success).toBe(true);
@@ -49,6 +53,7 @@ describe('Authoritative Contract Snapshot & Zero-Breaking-Change Guarantee', () 
     expect(typeof Runtime.MemoryInteractionRepository).toBe('function');
     expect(typeof Runtime.streamEvents).toBe('function');
     expect(typeof Runtime.computePayloadHash).toBe('function');
+    expect(typeof Runtime.createCompositeTelemetry).toBe('function');
   });
 
   it('freezes public Client export signatures', () => {
@@ -76,6 +81,7 @@ describe('Authoritative Contract Snapshot & Zero-Breaking-Change Guarantee', () 
     expect(typeof PgAdapter.createPgInteractionRepository).toBe('function');
     expect(typeof HttpAdapter.dispatchInteraction).toBe('function');
     expect(typeof AiAdapter.createAiSdkModelAdapter).toBe('function');
+    expect(typeof SqliteAdapter.createSqliteInteractionRepository).toBe('function');
   });
 
   it('freezes public Testkit export signatures', () => {

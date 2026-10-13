@@ -4,4 +4,5 @@ export * from './handlers';
 export * from './runner';
 export * from './memory.repository';
 export * from './sse';
+export * from './telemetry';
 //# sourceMappingURL=index.d.ts.map

@@ -1,4 +1,5 @@
 import { type ChangeReceipt, type DomainActionPlan } from '../core/contracts';
+import type { InteractionTelemetryPort } from './telemetry';
 export interface ActionCommitResult<State> {
     state: State;
     revision: number;
@@ -23,6 +24,7 @@ export declare function planActionCommit<State>(input: {
         entityVersions: ReadonlyMap<string, number>;
     }) => DomainActionPlan<State>;
     entityVersions?: ReadonlyMap<string, number>;
+    telemetry?: InteractionTelemetryPort;
 }): ActionCommitResult<State>;
 export interface BatchActionCommitResult<State> {
     state: State;
@@ -44,5 +46,6 @@ export declare function planBatchActionCommit<State>(input: {
         currentRevision: number;
         entityVersions: ReadonlyMap<string, number>;
     }) => DomainActionPlan<State>;
+    telemetry?: InteractionTelemetryPort;
 }): BatchActionCommitResult<State>;
 //# sourceMappingURL=action.service.d.ts.map

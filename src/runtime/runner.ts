@@ -1,6 +1,7 @@
 import type { InteractionRepository } from './repository';
 import type { DomainDefinition } from './handlers';
 import { computePayloadHash } from './repository';
+import type { InteractionTelemetryPort } from './telemetry';
 
 export interface InteractionModelMessage {
   role: 'user' | 'assistant' | 'system';
@@ -53,6 +54,7 @@ export interface AssistantRunOptions<State = unknown> {
   maxSteps?: number;
   systemPrompt?: string;
   signal?: AbortSignal;
+  telemetry?: InteractionTelemetryPort;
 }
 
 export interface AssistantRunResult {
@@ -68,6 +70,14 @@ export async function runAssistantTurn<State>(
 ): Promise<AssistantRunResult> {
   if (opts.signal?.aborted) throw new Error('RUN_ABORTED');
   const { workspaceId, ownerId, repo, domain, model, runId, leaseToken } = opts;
+  const turnStartTime = Date.now();
+  if (runId && opts.telemetry) {
+    opts.telemetry.onTurnStart?.({
+      workspaceId,
+      runId,
+      timestamp: turnStartTime,
+    });
+  }
 
   const ws = await repo.loadWorkspace<State>({ workspaceId, ownerId });
   if (!ws) throw new Error('WORKSPACE_NOT_FOUND');
@@ -273,6 +283,15 @@ Instructions:
       });
     }
   } catch (err: any) {
+    if (runId && opts.telemetry) {
+      opts.telemetry.onTurnEnd?.({
+        workspaceId,
+        runId,
+        durationMs: Date.now() - turnStartTime,
+        success: false,
+        error: err,
+      });
+    }
     if (runId && leaseToken) {
       await repo.recordStep({
         runId,
@@ -298,6 +317,16 @@ Instructions:
       role: 'assistant',
       parts: [{ type: 'text', text: responseText }],
       runId: runId ?? null,
+    });
+  }
+
+  if (runId && opts.telemetry) {
+    opts.telemetry.onTurnEnd?.({
+      workspaceId,
+      runId,
+      durationMs: Date.now() - turnStartTime,
+      success: true,
+      stepsCount: result.stepsCount,
     });
   }
 

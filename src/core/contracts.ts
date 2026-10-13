@@ -75,3 +75,26 @@ export interface DomainActionPlan<State> {
   summary: string;
   undoable: boolean;
 }
+
+export interface TypedActionDefinition<TType extends string, TInput> {
+  type: TType;
+  schema?: RuntimeSchema<TInput>;
+  create(payload: TInput): { type: TType } & TInput;
+}
+
+export function defineAction<TType extends string, TInput = Record<string, unknown>>(
+  type: TType,
+  schema?: RuntimeSchema<TInput>
+): TypedActionDefinition<TType, TInput> {
+  return {
+    type,
+    schema,
+    create(payload: TInput) {
+      if (schema) {
+        schema.parse(payload);
+      }
+      return { type, ...payload };
+    },
+  };
+}
+
