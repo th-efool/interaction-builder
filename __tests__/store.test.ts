@@ -49,6 +49,23 @@ function fake(init: { revision: number; cursor: number; v: V }) {
 }
 
 describe('interaction store', () => {
+  it('refreshes the final view when newer events overtake an in-flight snapshot', async () => {
+    const f = fake({ revision: 0, cursor: 0, v: { intent: 'initial' } });
+    const s = createInteractionStore<V>({ workspaceId: WS, initialView: { intent: '' }, transport: f.t });
+    await s.connect();
+    const original = f.t.getWorkspace;
+    let resolve!: (value: Awaited<ReturnType<typeof original>>) => void;
+    f.t.getWorkspace = () => new Promise(done => { resolve = done; });
+    f.emit(committed(1, 1));
+    f.setServer({ revision: 2, cursor: 2, v: { intent: 'final' } });
+    f.emit(committed(2, 2));
+    f.t.getWorkspace = original;
+    resolve({ workspaceId: WS, revision: 1, cursor: 1, snapshot: { intent: 'obsolete' } });
+    await tick(); await tick();
+    expect(s.getState().revision).toBe(2);
+    expect(s.getState().view.intent).toBe('final');
+    s.disconnect();
+  });
   it('connect loads snapshot and opens stream at cursor', async () => {
     const f = fake({ revision: 3, cursor: 7, v: { intent: 'a' } });
     const s = createInteractionStore<V>({ workspaceId: WS, initialView: { intent: '' }, transport: f.t });

@@ -120,6 +120,7 @@ export function createInteractionStore<View>(opts: InteractionStoreOptions<View>
   let closeStream: (() => void) | null = null;
   let stopped = false;
   let resnapshotting: Promise<void> | null = null;
+  let resnapshotAgain = false;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let reconnectAttempts = 0;
 
@@ -176,6 +177,10 @@ export function createInteractionStore<View>(opts: InteractionStoreOptions<View>
     set({ ...state, ...reduceInteraction(state, e) });
 
   function resnapshot(): Promise<void> {
+    if (resnapshotting) {
+      resnapshotAgain = true;
+      return resnapshotting;
+    }
     resnapshotting ??= transport
       .getWorkspace()
       .then(s => {
@@ -196,6 +201,13 @@ export function createInteractionStore<View>(opts: InteractionStoreOptions<View>
       })
       .finally(() => {
         resnapshotting = null;
+        // A newer event may have made the in-flight response obsolete. Coalesce
+        // its follow-up, not just its request, or the final view stays stale.
+        const again = resnapshotAgain;
+        resnapshotAgain = false;
+        if (again && !stopped && viewRevision < state.revision) {
+          void resnapshot().catch(() => scheduleReopen());
+        }
       });
     return resnapshotting;
   }

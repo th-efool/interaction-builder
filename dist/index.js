@@ -1732,6 +1732,7 @@ function createInteractionStore(opts) {
   let closeStream = null;
   let stopped = false;
   let resnapshotting = null;
+  let resnapshotAgain = false;
   let timer = null;
   let reconnectAttempts = 0;
   const past = [];
@@ -1779,6 +1780,10 @@ function createInteractionStore(opts) {
   };
   const apply = (e) => set({ ...state, ...reduceInteraction(state, e) });
   function resnapshot() {
+    if (resnapshotting) {
+      resnapshotAgain = true;
+      return resnapshotting;
+    }
     resnapshotting ??= transport.getWorkspace().then((s) => {
       if (s.revision >= state.revision) {
         viewRevision = s.revision;
@@ -1796,6 +1801,11 @@ function createInteractionStore(opts) {
       }
     }).finally(() => {
       resnapshotting = null;
+      const again = resnapshotAgain;
+      resnapshotAgain = false;
+      if (again && !stopped && viewRevision < state.revision) {
+        void resnapshot().catch(() => scheduleReopen());
+      }
     });
     return resnapshotting;
   }
