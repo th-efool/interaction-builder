@@ -386,8 +386,13 @@ function parseSseStream(stream, onEvent, onClose) {
       } else if (line.startsWith(":")) {
       } else if (line.startsWith("event: ")) {
         eventType = line.slice(7).trim();
+      } else if (line.startsWith("event:")) {
+        eventType = line.slice(6).trim();
       } else if (line.startsWith("data: ")) {
         const chunk = line.slice(6);
+        eventData = eventData.length > 0 ? eventData + "\n" + chunk : chunk;
+      } else if (line.startsWith("data:")) {
+        const chunk = line.slice(5);
         eventData = eventData.length > 0 ? eventData + "\n" + chunk : chunk;
       }
       newlineIndex = buffer.indexOf("\n");
@@ -402,6 +407,11 @@ function parseSseStream(stream, onEvent, onClose) {
           buffer += decoder.decode(value, { stream: true });
           processBuffer();
         }
+      }
+      buffer += decoder.decode();
+      if (buffer.length > 0) {
+        buffer += "\n\n";
+        processBuffer();
       }
     } catch {
     } finally {
@@ -575,18 +585,22 @@ function useInteractionState() {
 }
 function useInteractionSelector(selector, isEqual = Object.is) {
   const store = useInteractionStore();
+  const selectorRef = useRef2(selector);
+  selectorRef.current = selector;
+  const isEqualRef = useRef2(isEqual);
+  isEqualRef.current = isEqual;
   const cacheRef = useRef2({
     initialized: false,
     value: void 0
   });
   const getSnapshot = useCallback(() => {
-    const nextValue = selector(store.getState().view);
-    if (cacheRef.current.initialized && cacheRef.current.value !== void 0 && isEqual(cacheRef.current.value, nextValue)) {
+    const nextValue = selectorRef.current(store.getState().view);
+    if (cacheRef.current.initialized && isEqualRef.current(cacheRef.current.value, nextValue)) {
       return cacheRef.current.value;
     }
     cacheRef.current = { initialized: true, value: nextValue };
     return nextValue;
-  }, [store, selector, isEqual]);
+  }, [store]);
   return useSyncExternalStore(
     store.subscribe,
     getSnapshot,

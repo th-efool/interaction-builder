@@ -21,23 +21,27 @@ export function useInteractionSelector<View = unknown, Selected = unknown>(
   isEqual: (a: Selected, b: Selected) => boolean = Object.is
 ): Selected {
   const store = useInteractionStore<View>();
+  const selectorRef = useRef(selector);
+  selectorRef.current = selector;
+  const isEqualRef = useRef(isEqual);
+  isEqualRef.current = isEqual;
+
   const cacheRef = useRef<{ initialized: boolean; value: Selected | undefined }>({
     initialized: false,
     value: undefined,
   });
 
   const getSnapshot = useCallback(() => {
-    const nextValue = selector(store.getState().view);
+    const nextValue = selectorRef.current(store.getState().view);
     if (
       cacheRef.current.initialized &&
-      cacheRef.current.value !== undefined &&
-      isEqual(cacheRef.current.value, nextValue)
+      isEqualRef.current(cacheRef.current.value as Selected, nextValue)
     ) {
-      return cacheRef.current.value;
+      return cacheRef.current.value as Selected;
     }
     cacheRef.current = { initialized: true, value: nextValue };
     return nextValue;
-  }, [store, selector, isEqual]);
+  }, [store]);
 
   return useSyncExternalStore(
     store.subscribe,

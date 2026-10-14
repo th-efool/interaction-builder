@@ -50,4 +50,39 @@ describe('useInteractionSelector & Render Optimization', () => {
 
     expect(html).toContain('Alice');
   });
+
+  it('handles optional undefined slices without bypassing equality check', () => {
+    const store = createInteractionStore({
+      workspaceId: '550e8400-e29b-41d4-a716-446655440001',
+      initialView: {
+        item: undefined as string | undefined,
+      },
+      transport: {
+        getWorkspace: async () => ({
+          workspaceId: '550e8400-e29b-41d4-a716-446655440001',
+          domainId: 'demo',
+          domainVersion: 1,
+          revision: 1,
+          sequence: 1,
+          view: { item: undefined },
+          messages: [],
+        }),
+        commit: async () => ({} as any),
+        openEvents: () => () => {},
+      },
+    });
+
+    function OptionalItem() {
+      const item = useInteractionSelector((v: { item?: string }) => v.item);
+      return <span>{item === undefined ? 'empty' : item}</span>;
+    }
+
+    const html = renderToString(
+      <InteractionProvider store={store}>
+        <OptionalItem />
+      </InteractionProvider>
+    );
+
+    expect(html).toContain('empty');
+  });
 });
