@@ -464,6 +464,18 @@ function createSqliteInteractionRepository(driver) {
         if (wsRows.length === 0) throw new Error("WORKSPACE_NOT_FOUND");
         const ws = wsRows[0];
         if (ws.lifecycle !== "active") throw new Error("WORKSPACE_NOT_ACTIVE");
+        if (input.runFence) {
+          const runRows = await driver.query(
+            `SELECT * FROM interaction_runs WHERE id = ?`,
+            [input.runFence.runId]
+          );
+          if (runRows.length === 0 || runRows[0].status === "canceled") {
+            throw new Error("RUN_CANCELED");
+          }
+          const run = runRows[0];
+          if (run.leaseToken !== input.runFence.leaseToken) throw new Error("FENCE_EXPIRED");
+          if (run.leaseUntil && new Date(run.leaseUntil) < /* @__PURE__ */ new Date()) throw new Error("FENCE_EXPIRED");
+        }
         if (Number(ws.revision) !== input.expectedRevision) throw new Error("STALE_WORKSPACE");
         const currentSnapshot = typeof ws.snapshot === "string" ? JSON.parse(ws.snapshot) : ws.snapshot;
         const commitResult = planActionCommit({
@@ -481,6 +493,15 @@ function createSqliteInteractionRepository(driver) {
           `INSERT INTO interaction_events (id, workspaceId, sequence, protocolVersion, type, revision, payload, createdAt) VALUES (?, ?, ?, 1, 'workspace.committed', ?, ?, ?)`,
           [crypto.randomUUID(), input.workspaceId, nextSequence, commitResult.revision, JSON.stringify({ receipt: commitResult.receipt, snapshot: commitResult.state }), now]
         );
+        if (input.outboxItems) {
+          for (const item of input.outboxItems) {
+            await driver.query(
+              `INSERT OR IGNORE INTO interaction_outbox (id, workspaceId, kind, payload, dedupKey, status, attempts, dueAt, createdAt, updatedAt)
+               VALUES (?, ?, ?, ?, ?, 'pending', 0, ?, ?, ?)`,
+              [crypto.randomUUID(), input.workspaceId, item.kind, JSON.stringify(item.payload), item.dedupKey, now, now, now]
+            );
+          }
+        }
         const successResponse = {
           state: commitResult.state,
           revision: commitResult.revision,
@@ -541,7 +562,8 @@ function createSqliteInteractionRepository(driver) {
       await ensureInit();
       const now = (/* @__PURE__ */ new Date()).toISOString();
       const rows = await driver.query(
-        `SELECT * FROM interaction_runs WHERE status = 'queued' ORDER BY createdAt ASC LIMIT 1`
+        `SELECT * FROM interaction_runs WHERE status = 'queued' OR (status = 'running' AND leaseUntil < ?) ORDER BY createdAt ASC LIMIT 1`,
+        [now]
       );
       if (rows.length === 0) return null;
       const run = rows[0];
@@ -564,26 +586,62 @@ function createSqliteInteractionRepository(driver) {
     },
     async cancelRun(params) {
       await ensureInit();
+      const now = (/* @__PURE__ */ new Date()).toISOString();
       await driver.query(
-        `UPDATE interaction_runs SET status = 'canceled', error = ?, updatedAt = ? WHERE id = ?`,
-        [params.reason ?? "Canceled", (/* @__PURE__ */ new Date()).toISOString(), params.runId]
+        `UPDATE interaction_runs SET status = 'canceled', fence = fence + 1, error = ?, updatedAt = ? WHERE id = ?`,
+        [params.reason ?? "Canceled", now, params.runId]
       );
+      const runRows = await driver.query(`SELECT * FROM interaction_runs WHERE id = ?`, [params.runId]);
+      if (runRows.length > 0) {
+        const run = mapRun(runRows[0]);
+        const wsRows = await driver.query(`SELECT sequence FROM interaction_workspaces WHERE id = ?`, [run.workspaceId]);
+        const nextSeq = (Number(wsRows[0]?.sequence) || 0) + 1;
+        await driver.query(`UPDATE interaction_workspaces SET sequence = ?, updatedAt = ? WHERE id = ?`, [nextSeq, now, run.workspaceId]);
+        await driver.query(
+          `INSERT INTO interaction_events (id, workspaceId, sequence, protocolVersion, type, revision, payload, createdAt) VALUES (?, ?, ?, 1, 'run.changed', NULL, ?, ?)`,
+          [crypto.randomUUID(), run.workspaceId, nextSeq, JSON.stringify({ run }), now]
+        );
+      }
       return true;
     },
     async completeRun(params) {
       await ensureInit();
+      const now = (/* @__PURE__ */ new Date()).toISOString();
       await driver.query(
-        `UPDATE interaction_runs SET status = 'completed', leaseOwner = NULL, leaseToken = NULL, leaseUntil = NULL, updatedAt = ? WHERE id = ? AND leaseToken = ?`,
-        [(/* @__PURE__ */ new Date()).toISOString(), params.runId, params.leaseToken]
+        `UPDATE interaction_runs SET status = 'completed', leaseOwner = NULL, leaseToken = NULL, leaseUntil = NULL, budgetActual = ?, updatedAt = ? WHERE id = ? AND leaseToken = ?`,
+        [params.budgetActual ? JSON.stringify(params.budgetActual) : null, now, params.runId, params.leaseToken]
       );
+      const runRows = await driver.query(`SELECT * FROM interaction_runs WHERE id = ?`, [params.runId]);
+      if (runRows.length > 0) {
+        const run = mapRun(runRows[0]);
+        const wsRows = await driver.query(`SELECT sequence FROM interaction_workspaces WHERE id = ?`, [run.workspaceId]);
+        const nextSeq = (Number(wsRows[0]?.sequence) || 0) + 1;
+        await driver.query(`UPDATE interaction_workspaces SET sequence = ?, updatedAt = ? WHERE id = ?`, [nextSeq, now, run.workspaceId]);
+        await driver.query(
+          `INSERT INTO interaction_events (id, workspaceId, sequence, protocolVersion, type, revision, payload, createdAt) VALUES (?, ?, ?, 1, 'run.changed', NULL, ?, ?)`,
+          [crypto.randomUUID(), run.workspaceId, nextSeq, JSON.stringify({ run, assistantMessageId: params.assistantMessageId ?? null }), now]
+        );
+      }
       return true;
     },
     async failRun(params) {
       await ensureInit();
+      const now = (/* @__PURE__ */ new Date()).toISOString();
       await driver.query(
         `UPDATE interaction_runs SET status = 'failed', error = ?, leaseOwner = NULL, leaseToken = NULL, leaseUntil = NULL, updatedAt = ? WHERE id = ? AND leaseToken = ?`,
-        [params.error, (/* @__PURE__ */ new Date()).toISOString(), params.runId, params.leaseToken]
+        [params.error, now, params.runId, params.leaseToken]
       );
+      const runRows = await driver.query(`SELECT * FROM interaction_runs WHERE id = ?`, [params.runId]);
+      if (runRows.length > 0) {
+        const run = mapRun(runRows[0]);
+        const wsRows = await driver.query(`SELECT sequence FROM interaction_workspaces WHERE id = ?`, [run.workspaceId]);
+        const nextSeq = (Number(wsRows[0]?.sequence) || 0) + 1;
+        await driver.query(`UPDATE interaction_workspaces SET sequence = ?, updatedAt = ? WHERE id = ?`, [nextSeq, now, run.workspaceId]);
+        await driver.query(
+          `INSERT INTO interaction_events (id, workspaceId, sequence, protocolVersion, type, revision, payload, createdAt) VALUES (?, ?, ?, 1, 'run.changed', NULL, ?, ?)`,
+          [crypto.randomUUID(), run.workspaceId, nextSeq, JSON.stringify({ run, error: params.error }), now]
+        );
+      }
       return true;
     },
     async getRun(params) {

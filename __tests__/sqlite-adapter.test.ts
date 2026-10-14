@@ -71,8 +71,74 @@ function createMockSqliteDriver(): SqliteDriver {
         }
         return [];
       }
+      if (sql.includes('SELECT * FROM interaction_runs WHERE id = ?')) {
+        return getTable('runs').filter(r => r.id === params[0]);
+      }
       if (sql.includes('SELECT * FROM interaction_runs WHERE workspaceId = ?')) {
         return getTable('runs').filter(r => r.workspaceId === params[0]);
+      }
+      if (sql.includes('INSERT INTO interaction_runs')) {
+        getTable('runs').push({
+          id: params[0],
+          workspaceId: params[1],
+          triggeringMessageId: params[2],
+          status: 'queued',
+          contextEpoch: params[3],
+          observedRevision: params[4],
+          cursor: params[5],
+          fence: 0,
+          leaseOwner: null,
+          leaseToken: null,
+          leaseUntil: null,
+          createdAt: params[6],
+          updatedAt: params[6],
+        });
+        return [];
+      }
+      if (sql.includes('UPDATE interaction_runs SET status = ?')) {
+        const run = getTable('runs').find(r => r.id === params[1] || r.id === params[params.length - 1]);
+        if (run) {
+          run.status = params[0];
+        }
+        return [];
+      }
+      if (sql.includes('INSERT INTO interaction_events')) {
+        getTable('events').push({
+          id: params[0],
+          workspaceId: params[1],
+          sequence: params[2],
+          protocolVersion: 1,
+          type: params[3] ?? 'workspace.committed',
+          revision: params[4],
+          payload: params[5],
+          createdAt: params[6],
+        });
+        return [];
+      }
+      if (sql.includes('INSERT OR IGNORE INTO interaction_outbox')) {
+        getTable('outbox').push({
+          id: params[0],
+          workspaceId: params[1],
+          kind: params[2],
+          payload: params[3],
+          dedupKey: params[4],
+          status: 'pending',
+          attempts: 0,
+          dueAt: params[5],
+        });
+        return [];
+      }
+      if (sql.includes('SELECT sequence FROM interaction_workspaces WHERE id = ?')) {
+        const ws = getTable('workspaces').find(w => w.id === params[0]);
+        return ws ? [{ sequence: ws.sequence }] : [];
+      }
+      if (sql.includes('UPDATE interaction_workspaces SET sequence = ?')) {
+        const ws = getTable('workspaces').find(w => w.id === params[2]);
+        if (ws) {
+          ws.sequence = params[0];
+          ws.updatedAt = params[1];
+        }
+        return [];
       }
       return [];
     },
@@ -81,7 +147,7 @@ function createMockSqliteDriver(): SqliteDriver {
 }
 
 describe('Universal SQLite / LibSQL Adapter', () => {
-  it('creates workspace and executes transactional action commits', async () => {
+  it('creates workspace and executes transactional action commits with outbox', async () => {
     const driver = createMockSqliteDriver();
     const repo = createSqliteInteractionRepository(driver);
 
@@ -108,6 +174,9 @@ describe('Universal SQLite / LibSQL Adapter', () => {
         entityVersions: [],
         action: { type: 'inc' },
       },
+      outboxItems: [
+        { kind: 'notify', payload: { text: 'Counter incremented' }, dedupKey: 'dedup-1' },
+      ],
       plan: (state: any) => ({
         nextState: { ...state, count: state.count + 1 },
         changed: [],
@@ -129,5 +198,43 @@ describe('Universal SQLite / LibSQL Adapter', () => {
     expect(reloaded).not.toBeNull();
     expect(reloaded?.revision).toBe(1);
     expect(reloaded?.snapshot.count).toBe(1);
+  });
+
+  it('rejects commits with expired or non-existent run fences', async () => {
+    const driver = createMockSqliteDriver();
+    const repo = createSqliteInteractionRepository(driver);
+    const workspaceId = '550e8400-e29b-41d4-a716-446655440002';
+
+    await repo.createWorkspace({
+      id: workspaceId,
+      ownerId: 'user-1',
+      domainId: 'agenda',
+      domainVersion: 1,
+      initialSnapshot: { title: 'Fenced Agenda', count: 0 },
+    });
+
+    // Attempt commit with a non-existent runId fence
+    await expect(
+      repo.commitAction({
+        workspaceId,
+        ownerId: 'user-1',
+        expectedRevision: 0,
+        runFence: { runId: 'missing-run', leaseToken: 'tok-1' },
+        envelope: {
+          actionId: '550e8400-e29b-41d4-a716-446655440098',
+          workspaceId,
+          expectedRevision: 0,
+          entityVersions: [],
+          action: { type: 'inc' },
+        },
+        plan: (state: any) => ({
+          nextState: { ...state, count: state.count + 1 },
+          changed: [],
+          invalidated: [],
+          summary: 'Should fail',
+          undoable: true,
+        }),
+      })
+    ).rejects.toThrow('RUN_CANCELED');
   });
 });
