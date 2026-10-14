@@ -74,4 +74,24 @@ describe('RFC 6902 JSON Patch Engine & Delta State Sync', () => {
     expect(reduced.revision).toBe(2);
     expect(reduced.view).toEqual({ count: 11, note: 'updated' });
   });
+
+  it('correctly patches root arrays of differing lengths without nesting', () => {
+    const prev = [1, 2];
+    const next = [1, 2, 3];
+    const patch = generateJsonPatch(prev, next);
+    expect(patch).toEqual([{ op: 'replace', path: '', value: [1, 2, 3] }]);
+
+    const applied = applyJsonPatch(prev, patch);
+    expect(applied).toEqual([1, 2, 3]);
+  });
+
+  it('correctly replaces root primitive values and nulls', () => {
+    const patch = generateJsonPatch('old-string', 'new-string');
+    expect(patch).toEqual([{ op: 'replace', path: '', value: 'new-string' }]);
+    expect(applyJsonPatch('old-string', patch)).toBe('new-string');
+
+    const nullPatch = generateJsonPatch({ a: 1 }, null);
+    expect(nullPatch).toEqual([{ op: 'replace', path: '', value: null }]);
+    expect(applyJsonPatch({ a: 1 }, nullPatch)).toBe(null);
+  });
 });

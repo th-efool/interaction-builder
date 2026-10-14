@@ -116,7 +116,7 @@ export function generateJsonPatch(prev: unknown, next: unknown, basePath = ''): 
     typeof next !== 'object' ||
     Array.isArray(prev) !== Array.isArray(next)
   ) {
-    patch.push({ op: 'replace', path: basePath || '/', value: next });
+    patch.push({ op: 'replace', path: basePath, value: next });
     return patch;
   }
 
@@ -129,7 +129,7 @@ export function generateJsonPatch(prev: unknown, next: unknown, basePath = ''): 
       }
     } else {
       // For different lengths, replace the array directly for clean consistency
-      patch.push({ op: 'replace', path: basePath || '/', value: next });
+      patch.push({ op: 'replace', path: basePath, value: next });
     }
     return patch;
   }

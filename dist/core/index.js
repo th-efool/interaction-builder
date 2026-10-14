@@ -145,7 +145,7 @@ function generateJsonPatch(prev, next, basePath = "") {
   const patch = [];
   if (prev === next) return patch;
   if (prev === null || next === null || typeof prev !== "object" || typeof next !== "object" || Array.isArray(prev) !== Array.isArray(next)) {
-    patch.push({ op: "replace", path: basePath || "/", value: next });
+    patch.push({ op: "replace", path: basePath, value: next });
     return patch;
   }
   if (Array.isArray(prev) && Array.isArray(next)) {
@@ -155,7 +155,7 @@ function generateJsonPatch(prev, next, basePath = "") {
         patch.push(...generateJsonPatch(prev[i], next[i], itemPath));
       }
     } else {
-      patch.push({ op: "replace", path: basePath || "/", value: next });
+      patch.push({ op: "replace", path: basePath, value: next });
     }
     return patch;
   }

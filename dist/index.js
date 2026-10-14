@@ -145,7 +145,7 @@ function generateJsonPatch(prev, next, basePath = "") {
   const patch = [];
   if (prev === next) return patch;
   if (prev === null || next === null || typeof prev !== "object" || typeof next !== "object" || Array.isArray(prev) !== Array.isArray(next)) {
-    patch.push({ op: "replace", path: basePath || "/", value: next });
+    patch.push({ op: "replace", path: basePath, value: next });
     return patch;
   }
   if (Array.isArray(prev) && Array.isArray(next)) {
@@ -155,7 +155,7 @@ function generateJsonPatch(prev, next, basePath = "") {
         patch.push(...generateJsonPatch(prev[i], next[i], itemPath));
       }
     } else {
-      patch.push({ op: "replace", path: basePath || "/", value: next });
+      patch.push({ op: "replace", path: basePath, value: next });
     }
     return patch;
   }
@@ -667,6 +667,7 @@ Instructions:
   let toolInvocationIndex = 0;
   let lastToolError = null;
   const onToolStep = async (toolName, inputPayload, actionFn) => {
+    if (opts.signal?.aborted) throw new Error("RUN_ABORTED");
     toolInvocationIndex += 1;
     const currentOrdinal = toolInvocationIndex;
     const inputHash = computePayloadHash(inputPayload);
@@ -683,7 +684,7 @@ Instructions:
           `DIVERGENT_REPLAY: Input hash mismatch for tool ${toolName} at ordinal ${currentOrdinal}`
         );
       }
-      if (existing.state === "completed" && existing.result !== void 0 && existing.result !== null) {
+      if (existing.state === "completed") {
         return existing.result;
       }
     }
@@ -1452,6 +1453,7 @@ async function streamEvents(h, ownerId, workspaceId, after, opts = {}) {
   const enc = new TextEncoder();
   let cursor = after;
   let closed = false;
+  let onAbort;
   const stream = new ReadableStream({
     async start(controller) {
       const started = Date.now();
@@ -1466,7 +1468,14 @@ async function streamEvents(h, ownerId, workspaceId, after, opts = {}) {
           }
         }
       };
-      signal?.addEventListener("abort", close);
+      onAbort = close;
+      if (signal) {
+        if (signal.aborted) {
+          close();
+          return;
+        }
+        signal.addEventListener("abort", close);
+      }
       send("retry: 1000\n\n");
       let batch = first.body.events;
       try {
@@ -1487,10 +1496,12 @@ async function streamEvents(h, ownerId, workspaceId, after, opts = {}) {
           batch = next.body.events;
         }
       } finally {
+        if (signal && onAbort) signal.removeEventListener("abort", onAbort);
         close();
       }
     },
     cancel() {
+      if (signal && onAbort) signal.removeEventListener("abort", onAbort);
       closed = true;
     }
   });
@@ -1718,8 +1729,13 @@ function parseSseStream(stream, onEvent, onClose) {
       } else if (line.startsWith(":")) {
       } else if (line.startsWith("event: ")) {
         eventType = line.slice(7).trim();
+      } else if (line.startsWith("event:")) {
+        eventType = line.slice(6).trim();
       } else if (line.startsWith("data: ")) {
         const chunk = line.slice(6);
+        eventData = eventData.length > 0 ? eventData + "\n" + chunk : chunk;
+      } else if (line.startsWith("data:")) {
+        const chunk = line.slice(5);
         eventData = eventData.length > 0 ? eventData + "\n" + chunk : chunk;
       }
       newlineIndex = buffer.indexOf("\n");
@@ -1734,6 +1750,11 @@ function parseSseStream(stream, onEvent, onClose) {
           buffer += decoder.decode(value, { stream: true });
           processBuffer();
         }
+      }
+      buffer += decoder.decode();
+      if (buffer.length > 0) {
+        buffer += "\n\n";
+        processBuffer();
       }
     } catch {
     } finally {
