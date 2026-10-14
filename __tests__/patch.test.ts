@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyJsonPatch, generateJsonPatch } from '../src/core/patch';
+import { applyJsonPatch, generateJsonPatch, getValueByPointer, invertJsonPatch } from '../src/core/patch';
 import { reduceInteraction, type InteractionClientState } from '../src/core/reducer';
 
 describe('RFC 6902 JSON Patch Engine & Delta State Sync', () => {
@@ -94,4 +94,42 @@ describe('RFC 6902 JSON Patch Engine & Delta State Sync', () => {
     expect(nullPatch).toEqual([{ op: 'replace', path: '', value: null }]);
     expect(applyJsonPatch({ a: 1 }, nullPatch)).toBe(null);
   });
+
+  it('correctly resolves values using getValueByPointer', () => {
+    const doc = {
+      user: { name: 'Bob', settings: { theme: 'dark' } },
+      items: ['zero', 'one', 'two'],
+    };
+    expect(getValueByPointer(doc, '')).toEqual(doc);
+    expect(getValueByPointer(doc, '/user/name')).toBe('Bob');
+    expect(getValueByPointer(doc, '/user/settings/theme')).toBe('dark');
+    expect(getValueByPointer(doc, '/items/1')).toBe('one');
+    expect(getValueByPointer(doc, '/items/99')).toBeUndefined();
+    expect(getValueByPointer(doc, '/non/existent/path')).toBeUndefined();
+  });
+
+  it('computes exact inverse patches that restore original document states', () => {
+    const initialDoc = {
+      title: 'Original Title',
+      count: 10,
+      tags: ['alpha', 'beta'],
+      nested: { a: 1, b: 2 },
+    };
+
+    const targetDoc = {
+      title: 'Modified Title',
+      count: 25,
+      tags: ['alpha', 'gamma'],
+      nested: { a: 1, c: 3 },
+    };
+
+    const forwardPatch = generateJsonPatch(initialDoc, targetDoc);
+    const modifiedDoc = applyJsonPatch(initialDoc, forwardPatch);
+    expect(modifiedDoc).toEqual(targetDoc);
+
+    const inversePatch = invertJsonPatch(initialDoc, forwardPatch);
+    const restoredDoc = applyJsonPatch(modifiedDoc, inversePatch);
+    expect(restoredDoc).toEqual(initialDoc);
+  });
 });
+

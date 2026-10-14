@@ -178,6 +178,39 @@ function generateJsonPatch(prev, next, basePath = "") {
   }
   return patch;
 }
+function getValueByPointer(doc, path) {
+  if (path === "") return doc;
+  const tokens = parsePointer(path);
+  let current = doc;
+  for (const token of tokens) {
+    if (current === null || typeof current !== "object") return void 0;
+    if (!(token in current)) return void 0;
+    current = current[token];
+  }
+  return current;
+}
+function invertJsonPatch(doc, patch) {
+  const inverted = [];
+  for (let i = patch.length - 1; i >= 0; i--) {
+    const op = patch[i];
+    if (op.path === "") {
+      inverted.push({ op: "replace", path: "", value: structuredClone(doc) });
+      continue;
+    }
+    if (op.op === "add") {
+      inverted.push({ op: "remove", path: op.path });
+    } else if (op.op === "remove") {
+      const prevVal = getValueByPointer(doc, op.path);
+      inverted.push({ op: "add", path: op.path, value: structuredClone(prevVal) });
+    } else if (op.op === "replace") {
+      const prevVal = getValueByPointer(doc, op.path);
+      inverted.push({ op: "replace", path: op.path, value: structuredClone(prevVal) });
+    } else {
+      throw new Error(`Unsupported JSON Patch operation for inversion: "${op.op}"`);
+    }
+  }
+  return inverted;
+}
 
 // src/core/reducer.ts
 function reduceInteraction(state, input) {
@@ -237,8 +270,10 @@ export {
   defineAction,
   entityRefSchema,
   generateJsonPatch,
+  getValueByPointer,
   interactionEventSchema,
   interactionMessageSchema,
+  invertJsonPatch,
   messagePartSchema,
   reduceInteraction
 };

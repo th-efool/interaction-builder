@@ -158,3 +158,47 @@ export function generateJsonPatch(prev: unknown, next: unknown, basePath = ''): 
 
   return patch;
 }
+
+/**
+ * Resolves a JSON Pointer on a document to its target value.
+ * Returns undefined if path does not exist.
+ */
+export function getValueByPointer(doc: unknown, path: string): unknown {
+  if (path === '') return doc;
+  const tokens = parsePointer(path);
+  let current: any = doc;
+  for (const token of tokens) {
+    if (current === null || typeof current !== 'object') return undefined;
+    if (!(token in current)) return undefined;
+    current = current[token];
+  }
+  return current;
+}
+
+/**
+ * Computes the inverse of an RFC 6902 JSON patch against the document state before the patch was applied.
+ * Applying the inverse patch to the modified document restores the original document state.
+ */
+export function invertJsonPatch(doc: unknown, patch: JsonPatch): JsonPatch {
+  const inverted: JsonPatch = [];
+  // Walk operations in reverse order for correct LIFO undo semantics
+  for (let i = patch.length - 1; i >= 0; i--) {
+    const op = patch[i]!;
+    if (op.path === '') {
+      inverted.push({ op: 'replace', path: '', value: structuredClone(doc) });
+      continue;
+    }
+    if (op.op === 'add') {
+      inverted.push({ op: 'remove', path: op.path });
+    } else if (op.op === 'remove') {
+      const prevVal = getValueByPointer(doc, op.path);
+      inverted.push({ op: 'add', path: op.path, value: structuredClone(prevVal) });
+    } else if (op.op === 'replace') {
+      const prevVal = getValueByPointer(doc, op.path);
+      inverted.push({ op: 'replace', path: op.path, value: structuredClone(prevVal) });
+    } else {
+      throw new Error(`Unsupported JSON Patch operation for inversion: "${op.op}"`);
+    }
+  }
+  return inverted;
+}

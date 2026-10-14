@@ -178,6 +178,39 @@ function generateJsonPatch(prev, next, basePath = "") {
   }
   return patch;
 }
+function getValueByPointer(doc, path) {
+  if (path === "") return doc;
+  const tokens = parsePointer(path);
+  let current = doc;
+  for (const token of tokens) {
+    if (current === null || typeof current !== "object") return void 0;
+    if (!(token in current)) return void 0;
+    current = current[token];
+  }
+  return current;
+}
+function invertJsonPatch(doc, patch) {
+  const inverted = [];
+  for (let i = patch.length - 1; i >= 0; i--) {
+    const op = patch[i];
+    if (op.path === "") {
+      inverted.push({ op: "replace", path: "", value: structuredClone(doc) });
+      continue;
+    }
+    if (op.op === "add") {
+      inverted.push({ op: "remove", path: op.path });
+    } else if (op.op === "remove") {
+      const prevVal = getValueByPointer(doc, op.path);
+      inverted.push({ op: "add", path: op.path, value: structuredClone(prevVal) });
+    } else if (op.op === "replace") {
+      const prevVal = getValueByPointer(doc, op.path);
+      inverted.push({ op: "replace", path: op.path, value: structuredClone(prevVal) });
+    } else {
+      throw new Error(`Unsupported JSON Patch operation for inversion: "${op.op}"`);
+    }
+  }
+  return inverted;
+}
 
 // src/core/reducer.ts
 function reduceInteraction(state, input) {
@@ -1526,6 +1559,144 @@ function createCompositeTelemetry(ports) {
   };
 }
 
+// src/client/broadcast.ts
+function createCrossTabCoordinator(opts) {
+  const { workspaceId } = opts;
+  const tabId = opts.tabId ?? (typeof crypto !== "undefined" ? crypto.randomUUID() : Math.random().toString(36).slice(2));
+  const heartbeatInterval = opts.heartbeatIntervalMs ?? 1e3;
+  const leaderTimeout = opts.leaderTimeoutMs ?? 2500;
+  if (typeof BroadcastChannel === "undefined") {
+    return {
+      isLeader: () => true,
+      broadcastEvent: () => {
+      },
+      onEvent: () => () => {
+      },
+      onLeadershipChange: () => () => {
+      },
+      destroy: () => {
+      }
+    };
+  }
+  const channel = new BroadcastChannel(`ib:crosstab:${workspaceId}`);
+  let leader = false;
+  let leaderId = null;
+  let lastHeartbeat = Date.now();
+  let destroyed = false;
+  let heartbeatTimer = null;
+  let checkTimer = null;
+  const eventListeners = /* @__PURE__ */ new Set();
+  const leadershipListeners = /* @__PURE__ */ new Set();
+  function notifyLeadership(next) {
+    if (leader !== next) {
+      leader = next;
+      leadershipListeners.forEach((fn) => fn(leader));
+    }
+  }
+  function assumeLeadership() {
+    if (destroyed || leader) return;
+    leaderId = tabId;
+    notifyLeadership(true);
+    startHeartbeat();
+  }
+  function startHeartbeat() {
+    clearInterval(heartbeatTimer);
+    heartbeatTimer = setInterval(() => {
+      if (destroyed || !leader) return;
+      channel.postMessage({
+        type: "heartbeat",
+        workspaceId,
+        leaderId: tabId,
+        timestamp: Date.now()
+      });
+    }, heartbeatInterval);
+  }
+  const initialDelay = 100 + Math.floor(Math.random() * 200);
+  setTimeout(() => {
+    if (destroyed) return;
+    if (!leaderId) {
+      assumeLeadership();
+    }
+  }, initialDelay);
+  checkTimer = setInterval(() => {
+    if (destroyed || leader) return;
+    if (Date.now() - lastHeartbeat > leaderTimeout) {
+      assumeLeadership();
+    }
+  }, leaderTimeout / 2);
+  channel.onmessage = (ev) => {
+    if (destroyed) return;
+    const msg = ev.data;
+    if (!msg || msg.workspaceId !== workspaceId) return;
+    if (msg.type === "heartbeat") {
+      lastHeartbeat = Date.now();
+      if (msg.leaderId !== tabId) {
+        leaderId = msg.leaderId;
+        if (leader) {
+          if (tabId > msg.leaderId) {
+            clearInterval(heartbeatTimer);
+            notifyLeadership(false);
+          }
+        }
+      }
+    } else if (msg.type === "yield") {
+      if (leaderId === msg.leaderId) {
+        leaderId = null;
+        assumeLeadership();
+      }
+    } else if (msg.type === "event") {
+      if (msg.tabId !== tabId) {
+        eventListeners.forEach((fn) => fn(msg.event));
+      }
+    }
+  };
+  const handleUnload = () => {
+    if (leader) {
+      try {
+        channel.postMessage({
+          type: "yield",
+          workspaceId,
+          leaderId: tabId
+        });
+      } catch {
+      }
+    }
+  };
+  if (typeof window !== "undefined") {
+    window.addEventListener("beforeunload", handleUnload);
+  }
+  return {
+    isLeader: () => leader,
+    broadcastEvent(event) {
+      if (destroyed) return;
+      channel.postMessage({
+        type: "event",
+        workspaceId,
+        tabId,
+        event
+      });
+    },
+    onEvent(handler) {
+      eventListeners.add(handler);
+      return () => eventListeners.delete(handler);
+    },
+    onLeadershipChange(handler) {
+      leadershipListeners.add(handler);
+      return () => leadershipListeners.delete(handler);
+    },
+    destroy() {
+      destroyed = true;
+      clearInterval(heartbeatTimer);
+      clearInterval(checkTimer);
+      handleUnload();
+      if (typeof window !== "undefined") {
+        window.removeEventListener("beforeunload", handleUnload);
+      }
+      channel.close();
+    }
+  };
+}
+
 // src/client/store.ts
 var TransportError = class extends Error {
   constructor(status, code) {
@@ -1543,6 +1714,8 @@ function createInteractionStore(opts) {
   const maxReconnectDelay = opts.maxReconnectDelayMs ?? 1e4;
   const backoffMultiplier = opts.backoffMultiplier ?? 1.5;
   const withJitter = opts.jitter ?? true;
+  const enableHistory = opts.enableHistory ?? true;
+  const maxHistory = opts.maxHistory ?? 50;
   let state = {
     workspaceId,
     revision: 0,
@@ -1552,7 +1725,8 @@ function createInteractionStore(opts) {
     connection: "connecting",
     pending: {},
     lastReceipt: null,
-    lastError: null
+    lastError: null,
+    isTimeTraveling: false
   };
   const subs = /* @__PURE__ */ new Set();
   let closeStream = null;
@@ -1560,6 +1734,45 @@ function createInteractionStore(opts) {
   let resnapshotting = null;
   let timer = null;
   let reconnectAttempts = 0;
+  const past = [];
+  const future = [];
+  let isTimeTraveling = false;
+  let liveView = opts.initialView;
+  let liveRevision = 0;
+  function pushHistory(entry) {
+    if (!enableHistory) return;
+    past.push(entry);
+    if (past.length > maxHistory) past.shift();
+    future.length = 0;
+  }
+  function recordViewAdvance(nextRev, nextView, summary, action) {
+    if (nextRev > liveRevision) {
+      pushHistory({
+        revision: liveRevision,
+        view: liveView,
+        summary,
+        action,
+        timestamp: Date.now()
+      });
+      liveRevision = nextRev;
+      liveView = nextView;
+    }
+  }
+  let coordinator = null;
+  if (opts.crossTabSync) {
+    coordinator = createCrossTabCoordinator({ workspaceId });
+    coordinator.onEvent((event) => {
+      onServerEvent(event);
+    });
+    coordinator.onLeadershipChange((isLeader) => {
+      if (isLeader) {
+        open();
+      } else {
+        closeStream?.();
+        closeStream = null;
+      }
+    });
+  }
   const set = (next) => {
     state = next;
     subs.forEach((f) => f());
@@ -1569,14 +1782,17 @@ function createInteractionStore(opts) {
     resnapshotting ??= transport.getWorkspace().then((s) => {
       if (s.revision >= state.revision) {
         viewRevision = s.revision;
-        apply({
-          kind: "snapshot",
-          workspaceId,
-          revision: s.revision,
-          sequence: Math.max(s.cursor, state.sequence),
-          view: s.snapshot,
-          messages: s.messages ?? state.messages
-        });
+        recordViewAdvance(s.revision, s.snapshot);
+        if (!isTimeTraveling) {
+          apply({
+            kind: "snapshot",
+            workspaceId,
+            revision: s.revision,
+            sequence: Math.max(s.cursor, state.sequence),
+            view: s.snapshot,
+            messages: s.messages ?? state.messages
+          });
+        }
       }
     }).finally(() => {
       resnapshotting = null;
@@ -1585,11 +1801,15 @@ function createInteractionStore(opts) {
   }
   function open() {
     if (stopped) return;
+    if (coordinator && !coordinator.isLeader()) return;
     closeStream?.();
     closeStream = transport.openEvents(state.sequence, onServerEvent, onStreamClose);
   }
   function onServerEvent(event) {
     reconnectAttempts = 0;
+    if (coordinator && coordinator.isLeader()) {
+      coordinator.broadcastEvent(event);
+    }
     const before = state;
     apply({ kind: "server", event });
     if (state.connection === "reset_required") {
@@ -1604,6 +1824,7 @@ function createInteractionStore(opts) {
   const viewCoversRevision = (rev) => rev <= viewRevision;
   function scheduleReopen() {
     if (stopped) return;
+    if (coordinator && !coordinator.isLeader()) return;
     apply({ kind: "connection", value: "reconnecting" });
     const base = reconnectDelay * Math.pow(backoffMultiplier, reconnectAttempts);
     const capped = Math.min(maxReconnectDelay, base);
@@ -1628,6 +1849,8 @@ function createInteractionStore(opts) {
       reconnectAttempts = 0;
       const s = await transport.getWorkspace();
       viewRevision = s.revision;
+      liveRevision = s.revision;
+      liveView = s.snapshot;
       apply({
         kind: "snapshot",
         workspaceId,
@@ -1643,6 +1866,8 @@ function createInteractionStore(opts) {
       if (timer) clearTimeout(timer);
       closeStream?.();
       closeStream = null;
+      coordinator?.destroy();
+      coordinator = null;
     },
     async dispatchAction(action, entityVersions = []) {
       const actionId = newId();
@@ -1654,6 +1879,7 @@ function createInteractionStore(opts) {
         );
         if (res.revision > state.revision) {
           viewRevision = res.revision;
+          recordViewAdvance(res.revision, res.snapshot, res.receipt.summary, action);
           set({
             ...state,
             revision: res.revision,
@@ -1661,7 +1887,8 @@ function createInteractionStore(opts) {
             sequence: Math.max(state.sequence, res.cursor),
             pending: omit(state.pending, actionId),
             lastReceipt: { actionId, summary: res.receipt.summary },
-            lastError: null
+            lastError: null,
+            isTimeTraveling: false
           });
         } else {
           set({ ...state, pending: omit(state.pending, actionId) });
@@ -1669,6 +1896,42 @@ function createInteractionStore(opts) {
         return true;
       } catch (e) {
         const code = e instanceof TransportError ? e.code : "NETWORK";
+        if (code === "CONFLICT" && opts.conflictResolution === "rebase") {
+          try {
+            await resnapshot();
+            let rebasedAction = action;
+            if (opts.plan) {
+              opts.plan(liveView, action, {
+                actionId,
+                workspaceId,
+                expectedRevision: liveRevision,
+                currentRevision: liveRevision,
+                entityVersions: new Map(entityVersions.map((v) => [v.id, v.version]))
+              });
+            }
+            const retryActionId = newId();
+            const res = await transport.commit(
+              { actionId: retryActionId, workspaceId, expectedRevision: liveRevision, entityVersions, action: rebasedAction },
+              retryActionId
+            );
+            if (res.revision > liveRevision) {
+              viewRevision = res.revision;
+              recordViewAdvance(res.revision, res.snapshot, res.receipt.summary, action);
+              set({
+                ...state,
+                revision: res.revision,
+                view: res.snapshot,
+                sequence: Math.max(state.sequence, res.cursor),
+                pending: omit(state.pending, actionId),
+                lastReceipt: { actionId: retryActionId, summary: res.receipt.summary },
+                lastError: null,
+                isTimeTraveling: false
+              });
+              return true;
+            }
+          } catch {
+          }
+        }
         apply({ kind: "request_failed", actionId });
         set({ ...state, lastError: { actionId, code } });
         if (code === "CONFLICT") void resnapshot().catch(() => void 0);
@@ -1695,7 +1958,60 @@ function createInteractionStore(opts) {
       } catch {
         return false;
       }
-    }
+    },
+    getHistory: () => ({
+      past: [...past],
+      future: [...future],
+      canUndo: past.length > 0,
+      canRedo: future.length > 0,
+      isTimeTraveling,
+      activeRevision: state.revision
+    }),
+    canUndo: () => past.length > 0,
+    canRedo: () => future.length > 0,
+    undo() {
+      if (past.length === 0) return false;
+      const prev = past.pop();
+      future.unshift({
+        revision: state.revision,
+        view: state.view,
+        timestamp: Date.now()
+      });
+      isTimeTraveling = true;
+      set({ ...state, revision: prev.revision, view: prev.view, isTimeTraveling: true });
+      return true;
+    },
+    redo() {
+      if (future.length === 0) return false;
+      const next = future.shift();
+      past.push({
+        revision: state.revision,
+        view: state.view,
+        timestamp: Date.now()
+      });
+      isTimeTraveling = next.revision !== liveRevision;
+      set({ ...state, revision: next.revision, view: next.view, isTimeTraveling });
+      return true;
+    },
+    timeTravel(rev) {
+      if (rev === state.revision) return true;
+      if (rev === liveRevision) {
+        isTimeTraveling = false;
+        set({ ...state, revision: liveRevision, view: liveView, isTimeTraveling: false });
+        return true;
+      }
+      const match = past.find((e) => e.revision === rev) ?? future.find((e) => e.revision === rev);
+      if (!match) return false;
+      isTimeTraveling = true;
+      set({ ...state, revision: match.revision, view: match.view, isTimeTraveling: true });
+      return true;
+    },
+    resetTimeTravel() {
+      if (!isTimeTraveling) return;
+      isTimeTraveling = false;
+      set({ ...state, revision: liveRevision, view: liveView, isTimeTraveling: false });
+    },
+    isCrossTabLeader: () => coordinator ? coordinator.isLeader() : true
   };
 }
 function omit(o, k) {
@@ -1878,6 +2194,7 @@ export {
   changeReceiptSchema,
   computePayloadHash,
   createCompositeTelemetry,
+  createCrossTabCoordinator,
   createHttpTransport,
   createInteractionHandlers,
   createInteractionStore,
@@ -1886,8 +2203,10 @@ export {
   deterministicUuid,
   entityRefSchema,
   generateJsonPatch,
+  getValueByPointer,
   interactionEventSchema,
   interactionMessageSchema,
+  invertJsonPatch,
   messagePartSchema,
   parseSseStream,
   planActionCommit,
