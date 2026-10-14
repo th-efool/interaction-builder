@@ -1305,11 +1305,11 @@ async function streamEvents(h, ownerId, workspaceId, after, opts = {}) {
             send(frame(e));
             cursor = e.sequence;
           }
-          if (Date.now() - started >= maxMs) break;
           if (Date.now() - lastBeat >= heartbeatMs) {
             send(": hb\n\n");
             lastBeat = Date.now();
           }
+          if (Date.now() - started >= maxMs) break;
           await new Promise((r) => setTimeout(r, pollMs));
           if (closed) break;
           const next = await h.getEvents(ownerId, workspaceId, cursor);

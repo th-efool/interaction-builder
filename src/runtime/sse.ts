@@ -53,8 +53,8 @@ export async function streamEvents(h: Handlers, ownerId: string, workspaceId: st
       try {
         while (!closed) {
           for (const e of batch) { send(frame(e)); cursor = e.sequence; }
-          if (Date.now() - started >= maxMs) break;
           if (Date.now() - lastBeat >= heartbeatMs) { send(': hb\n\n'); lastBeat = Date.now(); }
+          if (Date.now() - started >= maxMs) break;
           await new Promise(r => setTimeout(r, pollMs));
           if (closed) break;
           const next = await h.getEvents(ownerId, workspaceId, cursor);

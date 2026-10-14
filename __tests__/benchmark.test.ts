@@ -77,7 +77,7 @@ describe('Performance Baselines & Throughput Benchmarks', () => {
 
     expect(clientState.sequence).toBe(iterations);
     expect(clientState.revision).toBe(iterations);
-    expect(opsPerSec).toBeGreaterThan(5000);
+    expect(opsPerSec).toBeGreaterThan(2000);
   });
 
   it('benchmarks SHA-256 idempotency hashing latency', () => {

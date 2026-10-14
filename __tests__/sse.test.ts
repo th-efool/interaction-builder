@@ -35,7 +35,7 @@ describe('SSE', () => {
   it('replays events after cursor with persisted-sequence ids, then closes at maxMs', async () => {
     const h = await setup();
     const text = await read(
-      await streamEvents(h, 'u1', WS, 1, { pollMs: 20, maxMs: 120, heartbeatMs: 10 })
+      await streamEvents(h, 'u1', WS, 1, { pollMs: 15, maxMs: 150, heartbeatMs: 10 })
     );
     expect(text).toContain('id: 2\nevent: workspace.committed');
     expect(text).not.toContain('id: 1\n');
