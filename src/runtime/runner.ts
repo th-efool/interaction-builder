@@ -157,6 +157,7 @@ Instructions:
     inputPayload: unknown,
     actionFn: (meta?: ToolStepMeta) => Promise<unknown>
   ) => {
+    if (opts.signal?.aborted) throw new Error('RUN_ABORTED');
     toolInvocationIndex += 1;
     const currentOrdinal = toolInvocationIndex;
     const inputHash = computePayloadHash(inputPayload);
@@ -175,7 +176,7 @@ Instructions:
           `DIVERGENT_REPLAY: Input hash mismatch for tool ${toolName} at ordinal ${currentOrdinal}`
         );
       }
-      if (existing.state === 'completed' && existing.result !== undefined && existing.result !== null) {
+      if (existing.state === 'completed') {
         return existing.result;
       }
     }

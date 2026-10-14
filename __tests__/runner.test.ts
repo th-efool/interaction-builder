@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { MemoryInteractionRepository } from '../src/runtime/memory.repository';
+import { computePayloadHash } from '../src/runtime/repository';
 import { runAssistantTurn } from '../src/runtime/runner';
 import { agendaDomain, sampleAgenda, type AgendaWorkspace } from '../src/testkit/agenda-domain';
 import { createAgendaAiTools } from '../examples/agenda/agenda.tools';
@@ -329,5 +330,123 @@ describe('Generic Assistant Runner & Durable Replay', () => {
         leaseToken,
       })
     ).rejects.toThrow('DIVERGENT_REPLAY');
+  });
+
+  it('correctly replays steps where result was null without re-executing action', async () => {
+    const repo = new MemoryInteractionRepository();
+    const wsId = crypto.randomUUID();
+    await repo.createWorkspace({
+      id: wsId,
+      ownerId: 'user-1',
+      domainId: 'agenda',
+      domainVersion: 1,
+      initialSnapshot: sampleAgenda,
+    });
+
+    await repo.appendMessage({
+      workspaceId: wsId,
+      ownerId: 'user-1',
+      id: crypto.randomUUID(),
+      role: 'user',
+      parts: [{ type: 'text', text: 'Please update' }],
+    });
+
+    const run = await repo.scheduleRun({ workspaceId: wsId, ownerId: 'user-1' });
+    const leaseToken = 'lease-null-test';
+    await repo.claimRun({
+      leaseOwner: 'worker-1',
+      leaseToken,
+      leaseDurationMs: 60_000,
+    });
+
+    // Seed step 1 as completed with null result
+    const inputPayload = { title: 'Null Test Title' };
+    await repo.recordStep({
+      runId: run.id,
+      leaseToken,
+      ordinal: 1,
+      kind: 'tool_call',
+      toolName: 'set_meeting_title',
+      inputPayload,
+      inputHash: computePayloadHash(inputPayload),
+      state: 'completed',
+      result: null,
+    });
+
+    let toolExecuted = false;
+    const model = createScriptedModelAdapter([
+      {
+        toolCalls: [
+          {
+            toolName: 'set_meeting_title',
+            input: { title: 'Null Test Title' },
+          },
+        ],
+      },
+      { text: 'Done' },
+    ]);
+
+    const res = await runAssistantTurn({
+      workspaceId: wsId,
+      ownerId: 'user-1',
+      repo,
+      domain: agendaDomain,
+      model,
+      createTools: (deps: any) => ({
+        set_meeting_title: {
+          description: 'Set title',
+          parameters: {} as any,
+          execute: async (input: any) => {
+            return deps.onToolStep('set_meeting_title', input, async () => {
+              toolExecuted = true;
+              return { ok: true };
+            });
+          },
+        },
+      }),
+      runId: run.id,
+      leaseToken,
+    });
+
+    expect(res.success).toBe(true);
+    // Tool must NOT have been re-executed because step 1 was completed (even with null result)
+    expect(toolExecuted).toBe(false);
+  });
+
+  it('aborts turn when AbortSignal is triggered before or during tool execution', async () => {
+    const repo = new MemoryInteractionRepository();
+    const wsId = crypto.randomUUID();
+    await repo.createWorkspace({
+      id: wsId,
+      ownerId: 'user-1',
+      domainId: 'agenda',
+      domainVersion: 1,
+      initialSnapshot: sampleAgenda,
+    });
+
+    await repo.appendMessage({
+      workspaceId: wsId,
+      ownerId: 'user-1',
+      id: crypto.randomUUID(),
+      role: 'user',
+      parts: [{ type: 'text', text: 'Please abort me' }],
+    });
+
+    const controller = new AbortController();
+    controller.abort(); // Pre-aborted
+
+    const model = createScriptedModelAdapter([{ text: 'Never reached' }]);
+
+    await expect(
+      runAssistantTurn({
+        workspaceId: wsId,
+        ownerId: 'user-1',
+        repo,
+        domain: agendaDomain,
+        model,
+        createTools: () => ({}),
+        signal: controller.signal,
+      })
+    ).rejects.toThrow('RUN_ABORTED');
   });
 });
