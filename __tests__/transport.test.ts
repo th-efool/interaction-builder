@@ -103,4 +103,32 @@ describe('HTTP & SSE Transport', () => {
     expect(capturedHeaders?.get('idempotency-key')).toBe('idemp-key-456');
     expect(capturedBody).toContain('msg-1');
   });
+
+  it('flushes pending buffer when stream ends at EOF', async () => {
+    const received: unknown[] = [];
+    let closed = false;
+
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        const enc = new TextEncoder();
+        // Event sent without trailing newline before EOF
+        controller.enqueue(enc.encode('data:{"sequence":3,"type":"eof.test"}'));
+        controller.close();
+      },
+    });
+
+    parseSseStream(
+      stream,
+      ev => received.push(ev),
+      () => {
+        closed = true;
+      }
+    );
+
+    await new Promise(r => setTimeout(r, 50));
+
+    expect(received).toHaveLength(1);
+    expect(received[0]).toEqual({ sequence: 3, type: 'eof.test' });
+    expect(closed).toBe(true);
+  });
 });

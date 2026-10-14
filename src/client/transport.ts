@@ -45,8 +45,13 @@ export function parseSseStream(
         // Comment / heartbeat - ignore
       } else if (line.startsWith('event: ')) {
         eventType = line.slice(7).trim();
+      } else if (line.startsWith('event:')) {
+        eventType = line.slice(6).trim();
       } else if (line.startsWith('data: ')) {
         const chunk = line.slice(6);
+        eventData = eventData.length > 0 ? eventData + '\n' + chunk : chunk;
+      } else if (line.startsWith('data:')) {
+        const chunk = line.slice(5);
         eventData = eventData.length > 0 ? eventData + '\n' + chunk : chunk;
       }
 
@@ -63,6 +68,11 @@ export function parseSseStream(
           buffer += decoder.decode(value, { stream: true });
           processBuffer();
         }
+      }
+      buffer += decoder.decode();
+      if (buffer.length > 0) {
+        buffer += '\n\n';
+        processBuffer();
       }
     } catch {
       // Reader canceled or network abort

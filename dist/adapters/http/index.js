@@ -17,6 +17,7 @@ async function streamEvents(h, ownerId, workspaceId, after, opts = {}) {
   const enc = new TextEncoder();
   let cursor = after;
   let closed = false;
+  let onAbort;
   const stream = new ReadableStream({
     async start(controller) {
       const started = Date.now();
@@ -31,7 +32,14 @@ async function streamEvents(h, ownerId, workspaceId, after, opts = {}) {
           }
         }
       };
-      signal?.addEventListener("abort", close);
+      onAbort = close;
+      if (signal) {
+        if (signal.aborted) {
+          close();
+          return;
+        }
+        signal.addEventListener("abort", close);
+      }
       send("retry: 1000\n\n");
       let batch = first.body.events;
       try {
@@ -52,10 +60,12 @@ async function streamEvents(h, ownerId, workspaceId, after, opts = {}) {
           batch = next.body.events;
         }
       } finally {
+        if (signal && onAbort) signal.removeEventListener("abort", onAbort);
         close();
       }
     },
     cancel() {
+      if (signal && onAbort) signal.removeEventListener("abort", onAbort);
       closed = true;
     }
   });

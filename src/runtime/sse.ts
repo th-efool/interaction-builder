@@ -32,6 +32,7 @@ export async function streamEvents(h: Handlers, ownerId: string, workspaceId: st
   const enc = new TextEncoder();
   let cursor = after;
   let closed = false;
+  let onAbort: (() => void) | undefined;
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
@@ -39,7 +40,14 @@ export async function streamEvents(h: Handlers, ownerId: string, workspaceId: st
       let lastBeat = started;
       const send = (s: string) => controller.enqueue(enc.encode(s));
       const close = () => { if (!closed) { closed = true; try { controller.close(); } catch { /* already closed */ } } };
-      signal?.addEventListener('abort', close);
+      onAbort = close;
+      if (signal) {
+        if (signal.aborted) {
+          close();
+          return;
+        }
+        signal.addEventListener('abort', close);
+      }
       send('retry: 1000\n\n');
       let batch = (first.body as { events: { sequence: number; type: string }[] }).events;
       try {
@@ -53,9 +61,15 @@ export async function streamEvents(h: Handlers, ownerId: string, workspaceId: st
           if (next.status !== 200) break;
           batch = (next.body as { events: { sequence: number; type: string }[] }).events;
         }
-      } finally { close(); }
+      } finally {
+        if (signal && onAbort) signal.removeEventListener('abort', onAbort);
+        close();
+      }
     },
-    cancel() { closed = true; },
+    cancel() {
+      if (signal && onAbort) signal.removeEventListener('abort', onAbort);
+      closed = true;
+    },
   });
   return new Response(stream, { status: 200, headers: SSE_HEADERS });
 }
