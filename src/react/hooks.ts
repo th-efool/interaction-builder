@@ -105,3 +105,35 @@ export function useRunAssistant() {
     return store.runAssistant();
   }, [store]);
 }
+
+/**
+ * Access time-travel history, undo/redo triggers, and revision navigation.
+ */
+export function useInteractionHistory<View = unknown>() {
+  const store = useInteractionStore<View>();
+  const history = useSyncExternalStore(
+    store.subscribe,
+    store.getHistory,
+    store.getHistory
+  );
+  return {
+    ...history,
+    undo: useCallback(() => store.undo(), [store]),
+    redo: useCallback(() => store.redo(), [store]),
+    timeTravel: useCallback((revision: number) => store.timeTravel(revision), [store]),
+    resetTimeTravel: useCallback(() => store.resetTimeTravel(), [store]),
+  };
+}
+
+/**
+ * Check if the current browser tab is the active SSE Leader tab in cross-tab sync mode.
+ */
+export function useIsCrossTabLeader() {
+  const store = useInteractionStore();
+  const getLeader = useCallback(() => (store.isCrossTabLeader ? store.isCrossTabLeader() : true), [store]);
+  return useSyncExternalStore(
+    store.subscribe,
+    getLeader,
+    () => true
+  );
+}

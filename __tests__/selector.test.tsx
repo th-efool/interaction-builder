@@ -3,7 +3,7 @@ import React, { act } from 'react';
 import { renderToString } from 'react-dom/server';
 import { createInteractionStore } from '../src/client/store';
 import { InteractionProvider } from '../src/react/provider';
-import { useInteractionSelector } from '../src/react/hooks';
+import { useInteractionSelector, useInteractionHistory, useIsCrossTabLeader } from '../src/react/hooks';
 
 describe('useInteractionSelector & Render Optimization', () => {
   it('selects fine-grained state slices correctly in React', () => {
@@ -85,4 +85,48 @@ describe('useInteractionSelector & Render Optimization', () => {
 
     expect(html).toContain('empty');
   });
+
+  it('renders with useInteractionHistory and useIsCrossTabLeader hooks', () => {
+    const store = createInteractionStore({
+      workspaceId: '550e8400-e29b-41d4-a716-446655440001',
+      initialView: { title: 'App' },
+      enableHistory: true,
+      transport: {
+        getWorkspace: async () => ({
+          workspaceId: '550e8400-e29b-41d4-a716-446655440001',
+          revision: 0,
+          cursor: 0,
+          snapshot: { title: 'App' },
+          messages: [],
+        }),
+        commit: async () => ({} as any),
+        openEvents: () => () => {},
+      },
+    });
+
+    function HistoryToolbar() {
+      const { canUndo, canRedo, isTimeTraveling } = useInteractionHistory();
+      const isLeader = useIsCrossTabLeader();
+      return (
+        <div>
+          <span>{`undo:${canUndo ? 'yes' : 'no'}`}</span>
+          <span>{`redo:${canRedo ? 'yes' : 'no'}`}</span>
+          <span>{`tt:${isTimeTraveling ? 'yes' : 'no'}`}</span>
+          <span>{`leader:${isLeader ? 'yes' : 'no'}`}</span>
+        </div>
+      );
+    }
+
+    const html = renderToString(
+      <InteractionProvider store={store}>
+        <HistoryToolbar />
+      </InteractionProvider>
+    );
+
+    expect(html).toContain('undo:no');
+    expect(html).toContain('redo:no');
+    expect(html).toContain('tt:no');
+    expect(html).toContain('leader:yes');
+  });
 });
+

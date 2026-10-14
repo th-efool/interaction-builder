@@ -1,5 +1,6 @@
 import { reduceInteraction, type InteractionClientState } from '../core/reducer';
 import type { InteractionMessage } from '../core/contracts';
+import { createCrossTabCoordinator, type CrossTabCoordinator } from './broadcast';
 
 export interface WorkspaceSnapshot<View> {
   workspaceId: string;
@@ -32,9 +33,27 @@ export interface InteractionTransport<View> {
   openEvents(cursor: number, onEvent: (event: unknown) => void, onClose: () => void): () => void;
 }
 
+export interface HistoryEntry<View> {
+  revision: number;
+  view: View;
+  summary?: string;
+  action?: unknown;
+  timestamp: number;
+}
+
+export interface StoreHistory<View> {
+  past: HistoryEntry<View>[];
+  future: HistoryEntry<View>[];
+  canUndo: boolean;
+  canRedo: boolean;
+  isTimeTraveling: boolean;
+  activeRevision: number;
+}
+
 export interface StoreState<View> extends InteractionClientState<View> {
   lastReceipt: { actionId: string; summary: string } | null;
   lastError: { actionId: string; code: string } | null;
+  isTimeTraveling?: boolean;
 }
 
 export interface InteractionStore<View> {
@@ -46,6 +65,16 @@ export interface InteractionStore<View> {
   dispatchAction(action: unknown, entityVersions?: { kind: string; id: string; version: number }[]): Promise<boolean>;
   sendMessage(parts: unknown[]): Promise<boolean>;
   runAssistant(): Promise<boolean>;
+  /** History & Time-Travel */
+  getHistory(): StoreHistory<View>;
+  canUndo(): boolean;
+  canRedo(): boolean;
+  undo(): boolean;
+  redo(): boolean;
+  timeTravel(revision: number): boolean;
+  resetTimeTravel(): void;
+  /** Cross-tab coordination inspection */
+  isCrossTabLeader?(): boolean;
 }
 
 export interface InteractionStoreOptions<View> {
@@ -57,6 +86,11 @@ export interface InteractionStoreOptions<View> {
   maxReconnectDelayMs?: number;
   backoffMultiplier?: number;
   jitter?: boolean;
+  enableHistory?: boolean;
+  maxHistory?: number;
+  crossTabSync?: boolean;
+  conflictResolution?: 'reject' | 'rebase';
+  plan?: (state: View, action: unknown, context: any) => { nextState: View; [k: string]: any };
 }
 
 export function createInteractionStore<View>(opts: InteractionStoreOptions<View>): InteractionStore<View> {
@@ -66,6 +100,8 @@ export function createInteractionStore<View>(opts: InteractionStoreOptions<View>
   const maxReconnectDelay = opts.maxReconnectDelayMs ?? 10000;
   const backoffMultiplier = opts.backoffMultiplier ?? 1.5;
   const withJitter = opts.jitter ?? true;
+  const enableHistory = opts.enableHistory ?? true;
+  const maxHistory = opts.maxHistory ?? 50;
 
   let state: StoreState<View> = {
     workspaceId,
@@ -77,13 +113,60 @@ export function createInteractionStore<View>(opts: InteractionStoreOptions<View>
     pending: {},
     lastReceipt: null,
     lastError: null,
+    isTimeTraveling: false,
   };
+
   const subs = new Set<() => void>();
   let closeStream: (() => void) | null = null;
   let stopped = false;
   let resnapshotting: Promise<void> | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let reconnectAttempts = 0;
+
+  // History & Time-Travel tracking
+  const past: HistoryEntry<View>[] = [];
+  const future: HistoryEntry<View>[] = [];
+  let isTimeTraveling = false;
+  let liveView: View = opts.initialView;
+  let liveRevision: number = 0;
+
+  function pushHistory(entry: HistoryEntry<View>) {
+    if (!enableHistory) return;
+    past.push(entry);
+    if (past.length > maxHistory) past.shift();
+    future.length = 0;
+  }
+
+  function recordViewAdvance(nextRev: number, nextView: View, summary?: string, action?: unknown) {
+    if (nextRev > liveRevision) {
+      pushHistory({
+        revision: liveRevision,
+        view: liveView,
+        summary,
+        action,
+        timestamp: Date.now(),
+      });
+      liveRevision = nextRev;
+      liveView = nextView;
+    }
+  }
+
+  // Cross-Tab Coordinator
+  let coordinator: CrossTabCoordinator | null = null;
+  if (opts.crossTabSync) {
+    coordinator = createCrossTabCoordinator({ workspaceId });
+    coordinator.onEvent(event => {
+      onServerEvent(event);
+    });
+    coordinator.onLeadershipChange(isLeader => {
+      if (isLeader) {
+        open();
+      } else {
+        closeStream?.();
+        closeStream = null;
+      }
+    });
+  }
 
   const set = (next: StoreState<View>) => {
     state = next;
@@ -98,14 +181,17 @@ export function createInteractionStore<View>(opts: InteractionStoreOptions<View>
       .then(s => {
         if (s.revision >= state.revision) {
           viewRevision = s.revision;
-          apply({
-            kind: 'snapshot',
-            workspaceId,
-            revision: s.revision,
-            sequence: Math.max(s.cursor, state.sequence),
-            view: s.snapshot,
-            messages: s.messages ?? state.messages,
-          });
+          recordViewAdvance(s.revision, s.snapshot);
+          if (!isTimeTraveling) {
+            apply({
+              kind: 'snapshot',
+              workspaceId,
+              revision: s.revision,
+              sequence: Math.max(s.cursor, state.sequence),
+              view: s.snapshot,
+              messages: s.messages ?? state.messages,
+            });
+          }
         }
       })
       .finally(() => {
@@ -116,12 +202,16 @@ export function createInteractionStore<View>(opts: InteractionStoreOptions<View>
 
   function open() {
     if (stopped) return;
+    if (coordinator && !coordinator.isLeader()) return;
     closeStream?.();
     closeStream = transport.openEvents(state.sequence, onServerEvent, onStreamClose);
   }
 
   function onServerEvent(event: unknown) {
     reconnectAttempts = 0;
+    if (coordinator && coordinator.isLeader()) {
+      coordinator.broadcastEvent(event);
+    }
     const before = state;
     apply({ kind: 'server', event });
     if (state.connection === 'reset_required') {
@@ -146,6 +236,7 @@ export function createInteractionStore<View>(opts: InteractionStoreOptions<View>
 
   function scheduleReopen() {
     if (stopped) return;
+    if (coordinator && !coordinator.isLeader()) return;
     apply({ kind: 'connection', value: 'reconnecting' });
     const base = reconnectDelay * Math.pow(backoffMultiplier, reconnectAttempts);
     const capped = Math.min(maxReconnectDelay, base);
@@ -175,6 +266,8 @@ export function createInteractionStore<View>(opts: InteractionStoreOptions<View>
       reconnectAttempts = 0;
       const s = await transport.getWorkspace();
       viewRevision = s.revision;
+      liveRevision = s.revision;
+      liveView = s.snapshot;
       apply({
         kind: 'snapshot',
         workspaceId,
@@ -190,6 +283,8 @@ export function createInteractionStore<View>(opts: InteractionStoreOptions<View>
       if (timer) clearTimeout(timer);
       closeStream?.();
       closeStream = null;
+      coordinator?.destroy();
+      coordinator = null;
     },
     async dispatchAction(action, entityVersions = []) {
       const actionId = newId();
@@ -201,7 +296,7 @@ export function createInteractionStore<View>(opts: InteractionStoreOptions<View>
         );
         if (res.revision > state.revision) {
           viewRevision = res.revision;
-          // Commit response carries authoritative view. Keep sequence monotonic with stream.
+          recordViewAdvance(res.revision, res.snapshot, res.receipt.summary, action);
           set({
             ...state,
             revision: res.revision,
@@ -210,6 +305,7 @@ export function createInteractionStore<View>(opts: InteractionStoreOptions<View>
             pending: omit(state.pending, actionId),
             lastReceipt: { actionId, summary: res.receipt.summary },
             lastError: null,
+            isTimeTraveling: false,
           });
         } else {
           set({ ...state, pending: omit(state.pending, actionId) });
@@ -217,6 +313,43 @@ export function createInteractionStore<View>(opts: InteractionStoreOptions<View>
         return true;
       } catch (e) {
         const code = e instanceof TransportError ? e.code : 'NETWORK';
+        if (code === 'CONFLICT' && opts.conflictResolution === 'rebase') {
+          try {
+            await resnapshot();
+            let rebasedAction = action;
+            if (opts.plan) {
+              opts.plan(liveView, action, {
+                actionId,
+                workspaceId,
+                expectedRevision: liveRevision,
+                currentRevision: liveRevision,
+                entityVersions: new Map(entityVersions.map(v => [v.id, v.version])),
+              });
+            }
+            const retryActionId = newId();
+            const res = await transport.commit(
+              { actionId: retryActionId, workspaceId, expectedRevision: liveRevision, entityVersions, action: rebasedAction },
+              retryActionId
+            );
+            if (res.revision > liveRevision) {
+              viewRevision = res.revision;
+              recordViewAdvance(res.revision, res.snapshot, res.receipt.summary, action);
+              set({
+                ...state,
+                revision: res.revision,
+                view: res.snapshot,
+                sequence: Math.max(state.sequence, res.cursor),
+                pending: omit(state.pending, actionId),
+                lastReceipt: { actionId: retryActionId, summary: res.receipt.summary },
+                lastError: null,
+                isTimeTraveling: false,
+              });
+              return true;
+            }
+          } catch {
+            // Rebase failed, continue to standard error handling
+          }
+        }
         apply({ kind: 'request_failed', actionId });
         set({ ...state, lastError: { actionId, code } });
         if (code === 'CONFLICT') void resnapshot().catch(() => undefined);
@@ -244,6 +377,59 @@ export function createInteractionStore<View>(opts: InteractionStoreOptions<View>
         return false;
       }
     },
+    getHistory: () => ({
+      past: [...past],
+      future: [...future],
+      canUndo: past.length > 0,
+      canRedo: future.length > 0,
+      isTimeTraveling,
+      activeRevision: state.revision,
+    }),
+    canUndo: () => past.length > 0,
+    canRedo: () => future.length > 0,
+    undo() {
+      if (past.length === 0) return false;
+      const prev = past.pop()!;
+      future.unshift({
+        revision: state.revision,
+        view: state.view,
+        timestamp: Date.now(),
+      });
+      isTimeTraveling = true;
+      set({ ...state, revision: prev.revision, view: prev.view, isTimeTraveling: true });
+      return true;
+    },
+    redo() {
+      if (future.length === 0) return false;
+      const next = future.shift()!;
+      past.push({
+        revision: state.revision,
+        view: state.view,
+        timestamp: Date.now(),
+      });
+      isTimeTraveling = next.revision !== liveRevision;
+      set({ ...state, revision: next.revision, view: next.view, isTimeTraveling });
+      return true;
+    },
+    timeTravel(rev: number) {
+      if (rev === state.revision) return true;
+      if (rev === liveRevision) {
+        isTimeTraveling = false;
+        set({ ...state, revision: liveRevision, view: liveView, isTimeTraveling: false });
+        return true;
+      }
+      const match = past.find(e => e.revision === rev) ?? future.find(e => e.revision === rev);
+      if (!match) return false;
+      isTimeTraveling = true;
+      set({ ...state, revision: match.revision, view: match.view, isTimeTraveling: true });
+      return true;
+    },
+    resetTimeTravel() {
+      if (!isTimeTraveling) return;
+      isTimeTraveling = false;
+      set({ ...state, revision: liveRevision, view: liveView, isTimeTraveling: false });
+    },
+    isCrossTabLeader: () => (coordinator ? coordinator.isLeader() : true),
   };
 }
 

@@ -272,4 +272,58 @@ describe('interaction store', () => {
 
     s.disconnect();
   });
+
+  it('automatically rebases actions on conflict when conflictResolution is "rebase"', async () => {
+    let serverRev = 1;
+    let serverView = { intent: 'concurrent-commit' };
+    let commitAttempts = 0;
+
+    const store = createInteractionStore<V>({
+      workspaceId: WS,
+      initialView: { intent: 'initial' },
+      conflictResolution: 'rebase',
+      plan: (state, action: any) => ({
+        nextState: { intent: action.intent },
+        changed: [],
+        invalidated: [],
+        summary: 'Rebased ' + action.intent,
+        undoable: true,
+      }),
+      transport: {
+        getWorkspace: async () => ({
+          workspaceId: WS,
+          revision: serverRev,
+          cursor: serverRev,
+          snapshot: serverView,
+        }),
+        commit: async (env: any) => {
+          commitAttempts++;
+          if (env.expectedRevision < serverRev) {
+            throw new TransportError(409, 'CONFLICT');
+          }
+          serverRev++;
+          serverView = { intent: env.action.intent };
+          return {
+            revision: serverRev,
+            cursor: serverRev,
+            snapshot: serverView,
+            receipt: { receiptId: 'r-' + serverRev, summary: 'Rebase ok' },
+          };
+        },
+        openEvents: () => () => {},
+      },
+    });
+
+    // Client starts with revision 0 (stale, server is at revision 1)
+    const success = await store.dispatchAction({ type: 'set_intent', intent: 'my-action' });
+    expect(success).toBe(true);
+    // Should have attempted once at rev 0, caught conflict, resnapshotted to rev 1, and re-attempted at rev 1
+    expect(commitAttempts).toBe(2);
+    expect(store.getState().revision).toBe(2);
+    expect(store.getState().view.intent).toBe('my-action');
+    expect(store.getState().lastError).toBeNull();
+
+    store.disconnect();
+  });
 });
+

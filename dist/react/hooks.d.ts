@@ -54,4 +54,23 @@ export declare function useSendMessage(): (text: string, entityRefs?: Array<{
     label: string;
 }>) => Promise<boolean>;
 export declare function useRunAssistant(): () => Promise<boolean>;
+/**
+ * Access time-travel history, undo/redo triggers, and revision navigation.
+ */
+export declare function useInteractionHistory<View = unknown>(): {
+    undo: () => boolean;
+    redo: () => boolean;
+    timeTravel: (revision: number) => boolean;
+    resetTimeTravel: () => void;
+    past: import("..").HistoryEntry<View>[];
+    future: import("..").HistoryEntry<View>[];
+    canUndo: boolean;
+    canRedo: boolean;
+    isTimeTraveling: boolean;
+    activeRevision: number;
+};
+/**
+ * Check if the current browser tab is the active SSE Leader tab in cross-tab sync mode.
+ */
+export declare function useIsCrossTabLeader(): boolean;
 //# sourceMappingURL=hooks.d.ts.map

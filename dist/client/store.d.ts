@@ -39,6 +39,21 @@ export interface InteractionTransport<View> {
     /** Open a bounded event stream after `cursor`. Returns closer. onClose fires when stream ends/fails. */
     openEvents(cursor: number, onEvent: (event: unknown) => void, onClose: () => void): () => void;
 }
+export interface HistoryEntry<View> {
+    revision: number;
+    view: View;
+    summary?: string;
+    action?: unknown;
+    timestamp: number;
+}
+export interface StoreHistory<View> {
+    past: HistoryEntry<View>[];
+    future: HistoryEntry<View>[];
+    canUndo: boolean;
+    canRedo: boolean;
+    isTimeTraveling: boolean;
+    activeRevision: number;
+}
 export interface StoreState<View> extends InteractionClientState<View> {
     lastReceipt: {
         actionId: string;
@@ -48,6 +63,7 @@ export interface StoreState<View> extends InteractionClientState<View> {
         actionId: string;
         code: string;
     } | null;
+    isTimeTraveling?: boolean;
 }
 export interface InteractionStore<View> {
     getState(): StoreState<View>;
@@ -62,6 +78,16 @@ export interface InteractionStore<View> {
     }[]): Promise<boolean>;
     sendMessage(parts: unknown[]): Promise<boolean>;
     runAssistant(): Promise<boolean>;
+    /** History & Time-Travel */
+    getHistory(): StoreHistory<View>;
+    canUndo(): boolean;
+    canRedo(): boolean;
+    undo(): boolean;
+    redo(): boolean;
+    timeTravel(revision: number): boolean;
+    resetTimeTravel(): void;
+    /** Cross-tab coordination inspection */
+    isCrossTabLeader?(): boolean;
 }
 export interface InteractionStoreOptions<View> {
     workspaceId: string;
@@ -72,6 +98,14 @@ export interface InteractionStoreOptions<View> {
     maxReconnectDelayMs?: number;
     backoffMultiplier?: number;
     jitter?: boolean;
+    enableHistory?: boolean;
+    maxHistory?: number;
+    crossTabSync?: boolean;
+    conflictResolution?: 'reject' | 'rebase';
+    plan?: (state: View, action: unknown, context: any) => {
+        nextState: View;
+        [k: string]: any;
+    };
 }
 export declare function createInteractionStore<View>(opts: InteractionStoreOptions<View>): InteractionStore<View>;
 //# sourceMappingURL=store.d.ts.map
