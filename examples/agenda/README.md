@@ -6,37 +6,37 @@ It is completely decoupled from any specific host domain (e.g. cohorts) and cont
 
 ---
 
-## Key Capabilities Demonstrated
+## Two Integration Profiles Demonstrated
 
-1. **Native Interaction-Managed State**:
-   - Single canonical store mounted via `<InteractionProvider>`.
-   - Domain-level pure action planning (`agendaDomain`) validating typed mutations, monotonic revision bumps, and entity-version fencing.
+### Profile 1: Native Interaction-Managed State
+- **Single Canonical Store**: The interaction builder's `interaction_workspaces` table owns the domain state.
+- **Pure Action Planning**: Mutations are defined by `DomainDefinition.plan` (`agendaDomain`), bumping monotonic revisions and updating the snapshot.
+- **Full History**: Supports client-side undo/redo and time-travel over historical snapshots.
 
-2. **Bidirectional Assistant & User Actions**:
-   - **User -> Assistant**: Human edits (e.g. updating meeting title or pinning items) are immediately reflected in the canonical state and visible in assistant turn context.
-   - **Assistant -> Workspace**: Assistant tool calls (`set_meeting_title`, `edit_item`, `set_item_pin`, `reorder_items`) directly update workspace state and dispatch real-time events to the UI.
-
-3. **Optimistic Updates & Conflict Rejection**:
-   - Client optimistically renders state changes while queuing actions.
-   - Stale workspace conflicts (CAS mismatches) are detected server-side and rejected (`STALE_WORKSPACE` / HTTP 409), triggering safe state resynchronization without data corruption.
-
-4. **Durable Persistence vs. Quick-Start**:
-   - **PostgreSQL Adapter (`interaction-builder/adapters/pg`)**: Production-ready durability using transactional commits, event sequencing, outbox delivery, and run lease fencing.
-   - **Memory Adapter (`interaction-builder/runtime`)**: Zero-dependency in-memory store for instant local testing and fast CI runs.
-
-5. **Deterministic AI Runner**:
-   - Operates with zero API keys and zero paid provider calls by default using `createDeterministicAgendaModelAdapter`.
+### Profile 2: Host-Owned Business Resource Profile
+- **Authoritative Business Authority**: The host application's existing database (e.g. `host_agenda_meetings` and `host_agenda_items`) remains the **sole source of truth**.
+- **No Dual Writers & No Competing Snapshots**: The interaction workspace stores **only interaction metadata** (`meetingId`, `observedVersion`, `selectedItemId`). It stores **zero duplicate business data**.
+- **Single Command Boundary (`HostAgendaService.executeCommand`)**: Both direct human UI operations and assistant tool executions call the exact same authorized host command boundary.
+- **CAS & Read-Set Fencing**: Commands specify `expectedVersion`. Stale model commands or concurrent client edits are rejected with `STALE_HOST_RESOURCE` (HTTP 409 `CONFLICT`) rather than silently overwriting.
+- **Idempotency & Replay Resilience**: Commands specify `commandId`. Retried requests return the cached receipt from `host_agenda_receipts` without duplicating mutations.
+- **Zero Phantom Reversals**: Turn cancellation halts subsequent steps but never falsely undos committed host effects.
 
 ---
 
 ## Directory Structure
 
-- `agenda.domain.ts` - Canonical domain schema, typed action definitions, and pure reducer plan (`planAgendaAction`).
-- `agenda.tools.ts` - AI tool definitions (`set_meeting_title`, `edit_item`, `set_item_pin`, `reorder_items`) with step journaling.
-- `agenda.ui.tsx` - React workspace components (`AgendaViewer`, `AgendaChat`, `AgendaApp`) with history undo/redo toolbar.
-- `server.ts` - HTTP API server dispatching standard interaction routes via `dispatchInteraction` from `interaction-builder/adapters/http`.
-- `worker.ts` - Background assistant worker claiming runs via `repo.claimRun` and executing deterministic turns.
-- `run.ts` - Headless end-to-end simulation script.
+- `agenda.domain.ts` - Native domain schema, typed action definitions, and pure reducer plan (`planAgendaAction`).
+- `agenda.tools.ts` - Native AI tool definitions with step journaling.
+- `agenda.ui.tsx` - Native React workspace components (`AgendaViewer`, `AgendaChat`, `AgendaApp`).
+- `host-agenda.domain.ts` - Host-owned business records schema (`HostAgendaMeeting`), typed host commands, and lightweight binding workspace.
+- `host-agenda.repository.ts` - Authoritative host repository (PostgreSQL `host_agenda_*` tables & in-memory store) with `SELECT ... FOR UPDATE` locking.
+- `host-agenda.service.ts` - Authorized host command boundary enforcing CAS, read-set checks, and idempotent receipts.
+- `host-agenda.tools.ts` - AI tool definitions bridging assistant turns directly to `HostAgendaService.executeCommand`.
+- `host-agenda.worker.ts` - Dedicated worker for host-owned agendas.
+- `host-agenda.ui.tsx` - React UI combining direct host commands and interaction-managed chat.
+- `server.ts` - Unified HTTP server supporting both native workspaces and host-owned business resources.
+- `worker.ts` - Unified background worker handling both native and host-owned domain runs.
+- `host-schema.sql` - SQL schema for host-owned tables (`host_agenda_meetings`, `host_agenda_items`, `host_agenda_receipts`).
 
 ---
 
@@ -61,25 +61,27 @@ curl http://localhost:3030/health
 ```bash
 export DATABASE_URL="postgres://postgres:postgres@localhost:5432/agenda_db"
 ```
-2. Start the server (schema migrations from `migrations/001_interaction_schema.sql` are applied automatically on boot):
+2. Start the server (engine and host migrations applied automatically on boot):
 ```bash
 npx tsx examples/agenda/server.ts
-```
-3. In a separate terminal, start the dedicated background worker (if `EMBEDDED_WORKER` is not set):
-```bash
-npx tsx examples/agenda/worker.ts
 ```
 
 ---
 
 ## API Endpoints Reference
 
-All routes are dispatched through `dispatchInteraction` under `/api/interaction/v1`:
+### 1. Host-Owned Business Resource Endpoints
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/api/host/meetings` | Create new authoritative host meeting |
+| `GET` | `/api/host/meetings/:id` | Read authoritative host meeting state |
+| `POST` | `/api/host/meetings/:id/commands` | Execute authorized typed command (with expectedVersion & Idempotency-Key) |
 
+### 2. Interaction Builder Orchestration Endpoints (`/api/interaction/v1`)
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/health` | Server health check and storage indicator |
-| `POST` | `/api/interaction/v1/workspaces` | Create a new agenda workspace |
+| `POST` | `/api/interaction/v1/workspaces` | Create a new agenda workspace (native or host-bound) |
 | `GET` | `/api/interaction/v1/workspaces/:id` | Fetch current workspace snapshot & revision |
 | `POST` | `/api/interaction/v1/workspaces/:id/actions` | Dispatch typed domain action (with CAS expectedRevision) |
 | `POST` | `/api/interaction/v1/workspaces/:id/messages` | Append user message with text & entity selection chips |

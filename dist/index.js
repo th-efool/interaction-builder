@@ -63,6 +63,30 @@ function defineAction(type, schema) {
     }
   };
 }
+var hostCommandEnvelopeSchema = z.strictObject({
+  commandId: z.string().uuid(),
+  ownerId: z.string().min(1).max(200),
+  resourceId: z.string().min(1).max(200),
+  expectedVersion: z.number().int().nonnegative(),
+  readSet: z.array(entityRefSchema).max(100).optional(),
+  command: z.unknown()
+});
+var hostCommandReceiptSchema = z.strictObject({
+  receiptId: z.string().uuid(),
+  commandId: z.string().uuid(),
+  resourceId: z.string().min(1).max(200),
+  resultingVersion: z.number().int().nonnegative(),
+  summary: z.string().min(1).max(500),
+  changed: z.array(entityRefSchema).max(100),
+  committedAt: z.string()
+});
+var hostResourceBindingSchema = z.strictObject({
+  schemaVersion: z.literal(1),
+  resourceId: z.string().min(1).max(200),
+  resourceKind: z.string().min(1).max(80),
+  observedVersion: z.number().int().nonnegative(),
+  selectedEntityId: z.string().nullable().optional()
+});
 
 // src/core/patch.ts
 function escapeJsonPointer(str) {
@@ -2236,6 +2260,9 @@ export {
   entityRefSchema,
   generateJsonPatch,
   getValueByPointer,
+  hostCommandEnvelopeSchema,
+  hostCommandReceiptSchema,
+  hostResourceBindingSchema,
   interactionEventSchema,
   interactionMessageSchema,
   invertJsonPatch,

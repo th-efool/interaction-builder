@@ -501,4 +501,115 @@ export interface TypedActionDefinition<TType extends string, TInput> {
     } & TInput;
 }
 export declare function defineAction<TType extends string, TInput = Record<string, unknown>>(type: TType, schema?: RuntimeSchema<TInput>): TypedActionDefinition<TType, TInput>;
+export declare const hostCommandEnvelopeSchema: z.ZodObject<{
+    commandId: z.ZodString;
+    ownerId: z.ZodString;
+    resourceId: z.ZodString;
+    expectedVersion: z.ZodNumber;
+    readSet: z.ZodOptional<z.ZodArray<z.ZodObject<{
+        kind: z.ZodString;
+        id: z.ZodString;
+        version: z.ZodNumber;
+    }, "strict", z.ZodTypeAny, {
+        kind: string;
+        id: string;
+        version: number;
+    }, {
+        kind: string;
+        id: string;
+        version: number;
+    }>, "many">>;
+    command: z.ZodUnknown;
+}, "strict", z.ZodTypeAny, {
+    commandId: string;
+    ownerId: string;
+    resourceId: string;
+    expectedVersion: number;
+    readSet?: {
+        kind: string;
+        id: string;
+        version: number;
+    }[] | undefined;
+    command?: unknown;
+}, {
+    commandId: string;
+    ownerId: string;
+    resourceId: string;
+    expectedVersion: number;
+    readSet?: {
+        kind: string;
+        id: string;
+        version: number;
+    }[] | undefined;
+    command?: unknown;
+}>;
+export type HostCommandEnvelope<C = unknown> = z.infer<typeof hostCommandEnvelopeSchema> & {
+    command: C;
+};
+export declare const hostCommandReceiptSchema: z.ZodObject<{
+    receiptId: z.ZodString;
+    commandId: z.ZodString;
+    resourceId: z.ZodString;
+    resultingVersion: z.ZodNumber;
+    summary: z.ZodString;
+    changed: z.ZodArray<z.ZodObject<{
+        kind: z.ZodString;
+        id: z.ZodString;
+        version: z.ZodNumber;
+    }, "strict", z.ZodTypeAny, {
+        kind: string;
+        id: string;
+        version: number;
+    }, {
+        kind: string;
+        id: string;
+        version: number;
+    }>, "many">;
+    committedAt: z.ZodString;
+}, "strict", z.ZodTypeAny, {
+    receiptId: string;
+    summary: string;
+    changed: {
+        kind: string;
+        id: string;
+        version: number;
+    }[];
+    commandId: string;
+    resourceId: string;
+    resultingVersion: number;
+    committedAt: string;
+}, {
+    receiptId: string;
+    summary: string;
+    changed: {
+        kind: string;
+        id: string;
+        version: number;
+    }[];
+    commandId: string;
+    resourceId: string;
+    resultingVersion: number;
+    committedAt: string;
+}>;
+export type HostCommandReceipt = z.infer<typeof hostCommandReceiptSchema>;
+export declare const hostResourceBindingSchema: z.ZodObject<{
+    schemaVersion: z.ZodLiteral<1>;
+    resourceId: z.ZodString;
+    resourceKind: z.ZodString;
+    observedVersion: z.ZodNumber;
+    selectedEntityId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+}, "strict", z.ZodTypeAny, {
+    resourceId: string;
+    schemaVersion: 1;
+    resourceKind: string;
+    observedVersion: number;
+    selectedEntityId?: string | null | undefined;
+}, {
+    resourceId: string;
+    schemaVersion: 1;
+    resourceKind: string;
+    observedVersion: number;
+    selectedEntityId?: string | null | undefined;
+}>;
+export type HostResourceBinding = z.infer<typeof hostResourceBindingSchema>;
 //# sourceMappingURL=contracts.d.ts.map

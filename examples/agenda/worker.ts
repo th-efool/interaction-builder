@@ -4,6 +4,9 @@ import { createPgInteractionRepository } from 'interaction-builder/adapters/pg';
 import { createMemoryInteractionRepository } from 'interaction-builder/runtime';
 import { agendaDomain, type AgendaWorkspace } from './agenda.domain';
 import { createAgendaAiTools } from './agenda.tools';
+import { hostBoundAgendaDomain, hostBoundAgendaWorkspaceSchema, type HostAgendaItem } from './host-agenda.domain';
+import { createHostAgendaAiTools } from './host-agenda.tools';
+import type { HostAgendaService } from './host-agenda.service';
 import type {
   InteractionModelAdapter,
   InteractionModelTurnInput,
@@ -82,6 +85,7 @@ export interface WorkerOptions {
   leaseDurationMs?: number;
   pool?: pg.Pool;
   defaultOwnerId?: string;
+  hostService?: HostAgendaService;
 }
 
 export function startAgendaWorker(options: WorkerOptions) {
@@ -116,26 +120,88 @@ export function startAgendaWorker(options: WorkerOptions) {
                   [claimed.workspaceId]
                 );
                 if (r.rows[0]?.ownerId) {
-                  ownerId = r.rows[0].ownerId;
+                  ownerId = String(r.rows[0].ownerId);
                 }
               } catch {}
             } else if ((repo as any).workspaces?.get) {
               const ws = (repo as any).workspaces.get(claimed.workspaceId);
               if (ws?.ownerId) {
-                ownerId = ws.ownerId;
+                ownerId = String(ws.ownerId);
               }
             }
 
-            const res = await runAssistantTurn({
-              workspaceId: claimed.workspaceId,
-              ownerId,
-              repo,
-              domain: agendaDomain,
-              model,
-              createTools: createAgendaAiTools,
-              runId: claimed.id,
-              leaseToken,
-            });
+            const ws = await repo.loadWorkspace({ workspaceId: claimed.workspaceId, ownerId });
+            if (!ws) {
+              await repo.failRun({
+                runId: claimed.id,
+                leaseToken,
+                error: 'WORKSPACE_NOT_FOUND',
+              });
+              continue;
+            }
+
+            let res;
+            if (ws.domainId === 'host_agenda' && options.hostService) {
+              // -----------------------------------------------------------
+              // Host-Owned Business Resource Profile
+              // -----------------------------------------------------------
+              const boundState = hostBoundAgendaWorkspaceSchema.parse(ws.snapshot);
+              const meeting = await options.hostService.getMeeting(ownerId, boundState.meetingId);
+              if (!meeting) {
+                await repo.failRun({
+                  runId: claimed.id,
+                  leaseToken,
+                  error: 'HOST_MEETING_NOT_FOUND',
+                });
+                continue;
+              }
+
+              const systemPrompt = `You are an AI assistant collaborating on this meeting agenda.
+Authoritative Host Meeting Record:
+Title: "${meeting.meetingTitle}" (Version: ${meeting.version}, Date: ${meeting.date})
+Items:
+${meeting.items.map((i: HostAgendaItem) => `- [${i.id}] "${i.title}" (${i.durationMinutes}m, presenter=${i.presenter}, pinned=${i.pinned}, v${i.version})`).join('\n')}
+
+Instructions:
+1. When the user asks for updates, call the available host tools.
+2. Every tool call modifies the authoritative host business records.
+3. If an item is pinned, its title cannot be changed.
+4. Be concise and helpful.`;
+
+              res = await runAssistantTurn({
+                workspaceId: claimed.workspaceId,
+                ownerId,
+                repo,
+                domain: hostBoundAgendaDomain as any,
+                model,
+                systemPrompt,
+                createTools: deps =>
+                  createHostAgendaAiTools({
+                    workspaceId: deps.workspaceId,
+                    ownerId: deps.ownerId,
+                    meetingId: meeting.id,
+                    hostService: options.hostService!,
+                    observedVersion: meeting.version,
+                    onToolStep: deps.onToolStep as any,
+                  }),
+                runId: claimed.id,
+                leaseToken,
+              });
+            } else {
+              // -----------------------------------------------------------
+              // Native Interaction-Managed State Profile
+              // -----------------------------------------------------------
+              res = await runAssistantTurn({
+                workspaceId: claimed.workspaceId,
+                ownerId,
+                repo,
+                domain: agendaDomain,
+                model,
+                createTools: createAgendaAiTools,
+                runId: claimed.id,
+                leaseToken,
+              });
+            }
 
             await repo.completeRun({
               runId: claimed.id,
@@ -174,28 +240,24 @@ export function startAgendaWorker(options: WorkerOptions) {
 
 export async function runStandaloneWorker() {
   const databaseUrl = process.env.DATABASE_URL;
-  let repo: InteractionRepository;
+  let repo;
   let pool: pg.Pool | undefined;
 
   if (databaseUrl && databaseUrl !== 'memory') {
-    const pgPool = new PgPool({ connectionString: databaseUrl });
-    pgPool.on('error', () => {
-      // Ignore background pool disconnects on shutdown
-    });
-    pool = pgPool;
-    repo = createPgInteractionRepository({ pool: pgPool });
+    pool = new PgPool({ connectionString: databaseUrl });
+    repo = createPgInteractionRepository({ pool });
   } else {
     repo = createMemoryInteractionRepository();
   }
 
-  console.log(`[Worker] Started agenda worker against ${databaseUrl && databaseUrl !== 'memory' ? 'PostgreSQL' : 'memory storage'}.`);
   const worker = startAgendaWorker({ repo, pool });
+  console.log('[Agenda Worker] Worker loop started.');
 
   const shutdown = async () => {
-    console.log('[Worker] Shutting down worker...');
+    console.log('[Agenda Worker] Stopping worker...');
     await worker.stop();
     if (pool) await pool.end();
-    console.log('[Worker] Shutdown complete.');
+    console.log('[Agenda Worker] Stopped cleanly.');
     process.exit(0);
   };
 
@@ -205,7 +267,7 @@ export async function runStandaloneWorker() {
 
 if (process.argv[1]?.endsWith('worker.ts') || process.argv[1]?.endsWith('worker.js')) {
   void runStandaloneWorker().catch(err => {
-    console.error('Worker failed:', err);
+    console.error('Worker failed to run:', err);
     process.exit(1);
   });
 }
