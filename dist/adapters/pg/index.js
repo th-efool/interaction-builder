@@ -254,7 +254,14 @@ function createPgInteractionRepository(options) {
   }
   return {
     async appendMessage(input) {
-      const payload = { id: input.id, role: input.role, parts: input.parts, runId: input.runId ?? null };
+      const scheduleAssistant = input.scheduleAssistant !== false && input.scheduleRun !== false;
+      const payload = {
+        id: input.id,
+        role: input.role,
+        parts: input.parts,
+        runId: input.runId ?? null,
+        ...!scheduleAssistant ? { scheduleAssistant: false } : {}
+      };
       return withTransaction(async (client) => {
         let hash = null;
         if (input.requestId) {
@@ -292,7 +299,22 @@ function createPgInteractionRepository(options) {
           [crypto.randomUUID(), input.workspaceId, nextSequence, JSON.stringify({ message }), now]
         );
         let scheduledRun;
-        if (input.scheduleRun !== false && input.role === "user") {
+        if (!scheduleAssistant && input.role === "user") {
+          await client.query(
+            `INSERT INTO "interaction_requests" ("id", "workspaceId", "actorId", "operation", "requestId", "payloadHash", "response", "createdAt")
+             VALUES ($1, $2, $3, 'assistantSchedulingSuppressed', $4, $5, $6, $7)`,
+            [
+              crypto.randomUUID(),
+              input.workspaceId,
+              input.ownerId,
+              input.id,
+              computePayloadHash({ messageId: input.id }),
+              JSON.stringify({ messageId: input.id }),
+              now
+            ]
+          );
+        }
+        if (scheduleAssistant && input.role === "user") {
           const activeRes = await client.query(
             `SELECT * FROM "interaction_runs"
              WHERE "workspaceId" = $1 AND "status" IN ('queued', 'running') LIMIT 1`,

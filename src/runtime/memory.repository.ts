@@ -29,7 +29,9 @@ export class MemoryInteractionRepository implements InteractionRepository {
   async appendMessage(input: AppendMessageInput): Promise<{ message: InteractionMessageRecord; sequence: number; run?: InteractionRunRecord }> {
     const ws = this.workspaces.get(input.workspaceId);
     if (!ws || ws.ownerId !== input.ownerId) throw new Error('WORKSPACE_NOT_FOUND');
-    const payload = { id: input.id, role: input.role, parts: input.parts, runId: input.runId ?? null };
+    const scheduleAssistant = input.scheduleAssistant !== false && input.scheduleRun !== false;
+    const payload = { id: input.id, role: input.role, parts: input.parts, runId: input.runId ?? null,
+      ...(!scheduleAssistant ? { scheduleAssistant: false } : {}) };
     let key: string | null = null;
     if (input.requestId) {
       key = `${input.workspaceId}:${input.ownerId}:appendMessage:${input.requestId}`;
@@ -70,7 +72,14 @@ export class MemoryInteractionRepository implements InteractionRepository {
     });
 
     let scheduledRun: InteractionRunRecord | undefined;
-    if (input.scheduleRun !== false && input.role === 'user') {
+    if (!scheduleAssistant && input.role === 'user') {
+      this.requests.set(`${input.workspaceId}:${input.ownerId}:assistantSchedulingSuppressed:${input.id}`, {
+        id: crypto.randomUUID(), workspaceId: input.workspaceId, actorId: input.ownerId,
+        operation: 'assistantSchedulingSuppressed', requestId: input.id,
+        payloadHash: computePayloadHash({ messageId: input.id }), response: { messageId: input.id }, createdAt: new Date(),
+      });
+    }
+    if (scheduleAssistant && input.role === 'user') {
       const active = Array.from(this.runs.values()).find(
         r => r.workspaceId === input.workspaceId && (r.status === 'queued' || r.status === 'running')
       );

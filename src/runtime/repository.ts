@@ -117,6 +117,8 @@ export interface AppendMessageInput {
   runId?: string | null;
   requestId?: string;
   scheduleRun?: boolean;
+  /** Trusted repository callers only; false retains the message without assistant admission. */
+  scheduleAssistant?: boolean;
 }
 
 export interface InteractionRunRecord {
