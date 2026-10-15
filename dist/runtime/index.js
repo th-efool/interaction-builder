@@ -600,7 +600,7 @@ Instructions:
         ordinal: 0,
         kind: "model_call",
         state: "completed",
-        result: { text: result.text, stepsCount: result.stepsCount }
+        result: { text: result.text, stepsCount: result.stepsCount, usage: result.usage }
       });
     }
   } catch (err) {
@@ -652,6 +652,7 @@ Instructions:
     assistantMessageId,
     text: responseText,
     stepsCount: result.stepsCount,
+    usage: result.usage,
     runId
   };
 }
@@ -995,7 +996,7 @@ var MemoryInteractionRepository = class {
       leaseToken: null,
       leaseUntil: null,
       deadline: null,
-      budgetReservation: null,
+      budgetReservation: params.budgetReservation ?? null,
       budgetActual: null,
       error: null,
       createdAt: /* @__PURE__ */ new Date(),

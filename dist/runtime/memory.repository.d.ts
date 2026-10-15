@@ -56,6 +56,7 @@ export declare class MemoryInteractionRepository implements InteractionRepositor
         triggeringMessageId?: string | null;
         observedRevision?: number;
         runId?: string;
+        budgetReservation?: unknown;
     }): Promise<InteractionRunRecord>;
     claimRun(params: {
         leaseOwner: string;

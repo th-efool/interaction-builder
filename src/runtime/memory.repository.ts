@@ -414,6 +414,7 @@ export class MemoryInteractionRepository implements InteractionRepository {
     triggeringMessageId?: string | null;
     observedRevision?: number;
     runId?: string;
+    budgetReservation?: unknown;
   }): Promise<InteractionRunRecord> {
     const ws = this.workspaces.get(params.workspaceId);
     if (!ws || ws.ownerId !== params.ownerId) throw new Error('WORKSPACE_NOT_FOUND');
@@ -437,7 +438,7 @@ export class MemoryInteractionRepository implements InteractionRepository {
       leaseToken: null,
       leaseUntil: null,
       deadline: null,
-      budgetReservation: null,
+      budgetReservation: params.budgetReservation ?? null,
       budgetActual: null,
       error: null,
       createdAt: new Date(),

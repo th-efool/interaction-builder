@@ -14,6 +14,11 @@ export interface InteractionModelTurnInput {
 export interface InteractionModelTurnOutput {
     text: string;
     stepsCount: number;
+    usage?: {
+        promptTokens?: number;
+        completionTokens?: number;
+        totalTokens?: number;
+    };
 }
 export interface InteractionModelAdapter {
     executeTurn(input: InteractionModelTurnInput): Promise<InteractionModelTurnOutput>;
@@ -53,6 +58,11 @@ export interface AssistantRunResult {
     assistantMessageId: string | null;
     text: string;
     stepsCount: number;
+    usage?: {
+        promptTokens?: number;
+        completionTokens?: number;
+        totalTokens?: number;
+    };
     runId?: string;
 }
 export declare function runAssistantTurn<State>(opts: AssistantRunOptions<State>): Promise<AssistantRunResult>;

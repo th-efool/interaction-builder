@@ -67,12 +67,18 @@ export function createAiSdkModelAdapter(
 
           const fullText = await streamResult.text;
           const steps = await streamResult.steps;
+          const streamUsage = await (streamResult as any).usage;
 
           if (fatalToolError) throw fatalToolError;
 
           return {
             text: fullText,
             stepsCount: steps?.length ?? 1,
+            usage: streamUsage ? {
+              promptTokens: streamUsage.promptTokens ?? streamUsage.inputTokens?.total,
+              completionTokens: streamUsage.completionTokens ?? streamUsage.outputTokens?.total,
+              totalTokens: streamUsage.totalTokens ?? (((streamUsage.inputTokens?.total ?? 0) + (streamUsage.outputTokens?.total ?? 0)) || undefined),
+            } : undefined,
           };
         } catch (err) {
           if (fatalToolError) throw fatalToolError;
@@ -99,9 +105,15 @@ export function createAiSdkModelAdapter(
         throw fatalToolError;
       }
 
+      const resUsage = (result as any).usage;
       return {
         text: result.text,
         stepsCount: result.steps?.length ?? 1,
+        usage: resUsage ? {
+          promptTokens: resUsage.promptTokens ?? resUsage.inputTokens?.total,
+          completionTokens: resUsage.completionTokens ?? resUsage.outputTokens?.total,
+          totalTokens: resUsage.totalTokens ?? (((resUsage.inputTokens?.total ?? 0) + (resUsage.outputTokens?.total ?? 0)) || undefined),
+        } : undefined,
       };
     },
   };

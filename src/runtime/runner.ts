@@ -18,6 +18,11 @@ export interface InteractionModelTurnInput {
 export interface InteractionModelTurnOutput {
   text: string;
   stepsCount: number;
+  usage?: {
+    promptTokens?: number;
+    completionTokens?: number;
+    totalTokens?: number;
+  };
 }
 
 export interface InteractionModelAdapter {
@@ -62,6 +67,11 @@ export interface AssistantRunResult {
   assistantMessageId: string | null;
   text: string;
   stepsCount: number;
+  usage?: {
+    promptTokens?: number;
+    completionTokens?: number;
+    totalTokens?: number;
+  };
   runId?: string;
 }
 
@@ -280,7 +290,7 @@ Instructions:
         ordinal: 0,
         kind: 'model_call',
         state: 'completed',
-        result: { text: result.text, stepsCount: result.stepsCount },
+        result: { text: result.text, stepsCount: result.stepsCount, usage: result.usage },
       });
     }
   } catch (err: any) {
@@ -336,6 +346,7 @@ Instructions:
     assistantMessageId,
     text: responseText,
     stepsCount: result.stepsCount,
+    usage: result.usage,
     runId,
   };
 }

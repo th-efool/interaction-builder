@@ -201,6 +201,7 @@ export interface InteractionRepository {
         triggeringMessageId?: string | null;
         observedRevision?: number;
         runId?: string;
+        budgetReservation?: unknown;
     }): Promise<InteractionRunRecord>;
     claimRun(params: {
         leaseOwner: string;

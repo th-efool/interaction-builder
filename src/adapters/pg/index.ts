@@ -502,9 +502,9 @@ export function createPgInteractionRepository(options: PgAdapterOptions): PgInte
         const runId = params.runId ?? crypto.randomUUID();
         const now = new Date();
         const runRes = await client.query(
-          `INSERT INTO "interaction_runs" ("id", "workspaceId", "triggeringMessageId", "status", "contextEpoch", "observedRevision", "cursor", "fence", "createdAt", "updatedAt")
-           VALUES ($1, $2, $3, 'queued', $4, $5, $6, 0, $7, $7) RETURNING *`,
-          [runId, params.workspaceId, params.triggeringMessageId ?? null, ws.contextEpoch, params.observedRevision ?? ws.revision, ws.sequence, now]
+          `INSERT INTO "interaction_runs" ("id", "workspaceId", "triggeringMessageId", "status", "contextEpoch", "observedRevision", "cursor", "fence", "budgetReservation", "createdAt", "updatedAt")
+           VALUES ($1, $2, $3, 'queued', $4, $5, $6, 0, $7, $8, $8) RETURNING *`,
+          [runId, params.workspaceId, params.triggeringMessageId ?? null, ws.contextEpoch, params.observedRevision ?? ws.revision, ws.sequence, params.budgetReservation ? JSON.stringify(params.budgetReservation) : null, now]
         );
 
         await client.query(

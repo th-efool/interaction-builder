@@ -678,7 +678,7 @@ var MemoryInteractionRepository = class {
       leaseToken: null,
       leaseUntil: null,
       deadline: null,
-      budgetReservation: null,
+      budgetReservation: params.budgetReservation ?? null,
       budgetActual: null,
       error: null,
       createdAt: /* @__PURE__ */ new Date(),
