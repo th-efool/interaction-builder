@@ -37,6 +37,7 @@ export interface ServerOptions {
   allowedOrigins?: string[];
   maxBodyBytes?: number;
   autoMigrate?: boolean;
+  staticDir?: string;
 }
 
 export async function createAgendaServer(options: ServerOptions = {}) {
@@ -433,6 +434,39 @@ export async function createAgendaServer(options: ServerOptions = {}) {
         }
       }
       return;
+    }
+
+    // -------------------------------------------------------------
+    // 7. Static Asset & Client Page Serving
+    // -------------------------------------------------------------
+    if (req.method === 'GET' && options.staticDir) {
+      if (url.pathname === '/' || url.pathname === '/index.html' || url.pathname === '/profile1' || url.pathname === '/profile2') {
+        const indexPath = path.join(options.staticDir, 'index.html');
+        if (fs.existsSync(indexPath)) {
+          const html = fs.readFileSync(indexPath, 'utf8');
+          res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+          res.end(html);
+          return;
+        }
+      }
+      if (url.pathname.startsWith('/assets/')) {
+        const assetFile = path.basename(url.pathname);
+        const assetPath = path.join(options.staticDir, assetFile);
+        if (fs.existsSync(assetPath)) {
+          const ext = path.extname(assetFile).toLowerCase();
+          const mimeTypes: Record<string, string> = {
+            '.js': 'application/javascript; charset=utf-8',
+            '.mjs': 'application/javascript; charset=utf-8',
+            '.css': 'text/css; charset=utf-8',
+            '.html': 'text/html; charset=utf-8',
+            '.json': 'application/json; charset=utf-8',
+            '.png': 'image/png',
+          };
+          res.writeHead(200, { 'Content-Type': mimeTypes[ext] || 'application/octet-stream' });
+          fs.createReadStream(assetPath).pipe(res);
+          return;
+        }
+      }
     }
 
     res.writeHead(404, { 'Content-Type': 'text/plain' });
