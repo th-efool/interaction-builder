@@ -131,11 +131,32 @@ export function createInteractionStore<View>(opts: InteractionStoreOptions<View>
   let liveView: View = opts.initialView;
   let liveRevision: number = 0;
 
+  let historySnapshot = {
+    past: [] as HistoryEntry<View>[],
+    future: [] as HistoryEntry<View>[],
+    canUndo: false,
+    canRedo: false,
+    isTimeTraveling: false,
+    activeRevision: state.revision,
+  };
+
+  function updateHistorySnapshot() {
+    historySnapshot = {
+      past: [...past],
+      future: [...future],
+      canUndo: past.length > 0,
+      canRedo: future.length > 0,
+      isTimeTraveling,
+      activeRevision: state.revision,
+    };
+  }
+
   function pushHistory(entry: HistoryEntry<View>) {
     if (!enableHistory) return;
     past.push(entry);
     if (past.length > maxHistory) past.shift();
     future.length = 0;
+    updateHistorySnapshot();
   }
 
   function recordViewAdvance(nextRev: number, nextView: View, summary?: string, action?: unknown) {
@@ -170,7 +191,11 @@ export function createInteractionStore<View>(opts: InteractionStoreOptions<View>
   }
 
   const set = (next: StoreState<View>) => {
+    const revChanged = state.revision !== next.revision || state.isTimeTraveling !== next.isTimeTraveling;
     state = next;
+    if (revChanged) {
+      updateHistorySnapshot();
+    }
     subs.forEach(f => f());
   };
   const apply = (e: Parameters<typeof reduceInteraction<View>>[1]) =>
@@ -389,14 +414,7 @@ export function createInteractionStore<View>(opts: InteractionStoreOptions<View>
         return false;
       }
     },
-    getHistory: () => ({
-      past: [...past],
-      future: [...future],
-      canUndo: past.length > 0,
-      canRedo: future.length > 0,
-      isTimeTraveling,
-      activeRevision: state.revision,
-    }),
+    getHistory: () => historySnapshot,
     canUndo: () => past.length > 0,
     canRedo: () => future.length > 0,
     undo() {
@@ -409,6 +427,7 @@ export function createInteractionStore<View>(opts: InteractionStoreOptions<View>
       });
       isTimeTraveling = true;
       set({ ...state, revision: prev.revision, view: prev.view, isTimeTraveling: true });
+      updateHistorySnapshot();
       return true;
     },
     redo() {
@@ -421,6 +440,7 @@ export function createInteractionStore<View>(opts: InteractionStoreOptions<View>
       });
       isTimeTraveling = next.revision !== liveRevision;
       set({ ...state, revision: next.revision, view: next.view, isTimeTraveling });
+      updateHistorySnapshot();
       return true;
     },
     timeTravel(rev: number) {
@@ -428,18 +448,21 @@ export function createInteractionStore<View>(opts: InteractionStoreOptions<View>
       if (rev === liveRevision) {
         isTimeTraveling = false;
         set({ ...state, revision: liveRevision, view: liveView, isTimeTraveling: false });
+        updateHistorySnapshot();
         return true;
       }
       const match = past.find(e => e.revision === rev) ?? future.find(e => e.revision === rev);
       if (!match) return false;
       isTimeTraveling = true;
       set({ ...state, revision: match.revision, view: match.view, isTimeTraveling: true });
+      updateHistorySnapshot();
       return true;
     },
     resetTimeTravel() {
       if (!isTimeTraveling) return;
       isTimeTraveling = false;
       set({ ...state, revision: liveRevision, view: liveView, isTimeTraveling: false });
+      updateHistorySnapshot();
     },
     isCrossTabLeader: () => (coordinator ? coordinator.isLeader() : true),
   };
