@@ -493,6 +493,9 @@ export async function createAgendaServer(options: ServerOptions = {}) {
       if (workerHandle) {
         await workerHandle.stop();
       }
+      if (typeof (server as any).closeAllConnections === 'function') {
+        (server as any).closeAllConnections();
+      }
       await new Promise<void>((resolve) => server.close(() => resolve()));
       if (pool) {
         await pool.end();

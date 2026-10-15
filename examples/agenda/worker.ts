@@ -25,10 +25,34 @@ export function createDeterministicAgendaModelAdapter(): InteractionModelAdapter
       const lastUserMsg = [...input.messages].reverse().find(m => m.role === 'user');
       const text = lastUserMsg?.content.toLowerCase() ?? '';
 
+      const detectItemId = (fallbackId: string) => {
+        for (const msg of input.messages) {
+          const parts = (msg as any).parts;
+          if (Array.isArray(parts)) {
+            for (const part of parts) {
+              if (part?.type === 'entity_ref' && part.entity?.id) {
+                return String(part.entity.id);
+              }
+            }
+          }
+        }
+        if (text.includes('executive') || text.includes('compensation') || text.includes('h-item-1')) {
+          return 'h-item-1';
+        }
+        if (text.includes('m&a') || text.includes('strategy') || text.includes('h-item-2')) {
+          return 'h-item-2';
+        }
+        return fallbackId;
+      };
+
       // 1. Rename / Title action
       if (text.includes('rename') || text.includes('title')) {
         const match = lastUserMsg?.content.match(/["']([^"']+)["']/);
-        const newTitle = match ? match[1] : 'Executive Strategy Review';
+        let newTitle = match ? match[1] : null;
+        if (!newTitle) {
+          const m2 = lastUserMsg?.content.match(/(?:rename (?:the )?meeting to|title to)\s+([^,.\n]+?)(?:\s+and\b|[.,\n]|$)/i);
+          newTitle = m2 ? m2[1].trim() : 'Executive Strategy Review';
+        }
         if (input.tools.set_meeting_title) {
           await input.tools.set_meeting_title.execute({ title: newTitle });
           stepsCount += 1;
@@ -37,13 +61,15 @@ export function createDeterministicAgendaModelAdapter(): InteractionModelAdapter
 
       // 2. Pin / Unpin action
       if (text.includes('unpin')) {
+        const targetId = detectItemId('item-1');
         if (input.tools.set_item_pin) {
-          await input.tools.set_item_pin.execute({ itemId: 'item-1', pinned: false });
+          await input.tools.set_item_pin.execute({ itemId: targetId, pinned: false });
           stepsCount += 1;
         }
       } else if (text.includes('pin')) {
+        const targetId = detectItemId('item-1');
         if (input.tools.set_item_pin) {
-          await input.tools.set_item_pin.execute({ itemId: 'item-1', pinned: true });
+          await input.tools.set_item_pin.execute({ itemId: targetId, pinned: true });
           stepsCount += 1;
         }
       }
@@ -52,16 +78,20 @@ export function createDeterministicAgendaModelAdapter(): InteractionModelAdapter
       if (text.includes('duration') || text.includes('minutes') || text.includes('longer') || text.includes('shorter')) {
         const numMatch = text.match(/\b(\d+)\s*(min|minute|m)?\b/);
         const durationMinutes = numMatch ? parseInt(numMatch[1], 10) : 45;
+        const targetId = detectItemId('item-1');
         if (input.tools.edit_item) {
-          await input.tools.edit_item.execute({ itemId: 'item-1', durationMinutes });
+          await input.tools.edit_item.execute({ itemId: targetId, durationMinutes });
           stepsCount += 1;
         }
       }
 
       // 4. Reorder items
       if (text.includes('reorder') || text.includes('swap') || text.includes('reverse')) {
+        const itemIds = text.includes('h-item') || text.includes('compensation') || text.includes('board')
+          ? ['h-item-2', 'h-item-1']
+          : ['item-2', 'item-1'];
         if (input.tools.reorder_items) {
-          await input.tools.reorder_items.execute({ itemIds: ['item-2', 'item-1'] });
+          await input.tools.reorder_items.execute({ itemIds });
           stepsCount += 1;
         }
       }
@@ -141,7 +171,7 @@ export function startAgendaWorker(options: WorkerOptions) {
             }
 
             let res;
-            if (ws.domainId === 'host_agenda' && options.hostService) {
+            if ((ws.domainId === 'host_agenda' || ws.domainId === 'host-agenda') && options.hostService) {
               // -----------------------------------------------------------
               // Host-Owned Business Resource Profile
               // -----------------------------------------------------------

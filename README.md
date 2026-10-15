@@ -149,6 +149,38 @@ This verifies the end-to-end lifecycle:
 
 ---
 
+## Security Defaults
+
+Standalone HTTP servers enforce strict production defaults:
+- **Loopback Default**: Binds to `127.0.0.1` by default; requires explicit `HOST=0.0.0.0` for public interfaces.
+- **Anti-Impersonation**: Enforces `PrincipalResolver` where client request bodies cannot override authenticated `ownerId` (HTTP 400 `FORBIDDEN_OWNERSHIP_OVERRIDE`).
+- **Fail-Closed Auth**: In production, unauthenticated requests reject with HTTP 401 `UNAUTHORIZED`.
+- **CORS Allowlist**: Explicit `allowedOrigins` checking rejecting unauthorized cross-origin requests with HTTP 403 `CORS_FORBIDDEN`.
+- **Streaming Body Ceilings**: Aborts oversized requests with HTTP 413 `PAYLOAD_TOO_LARGE` (default 1MB).
+- **Content-Type Enforcement**: Mutating requests require `application/json` (HTTP 415 `UNSUPPORTED_MEDIA_TYPE`).
+
+---
+
+## Verification & Testing
+
+Interaction Builder includes end-to-end verification suites exercising both Native and Host-Owned integration profiles:
+
+```bash
+# 1. Package test suite (100+ tests)
+npm test
+
+# 2. Real browser acceptance with Playwright (Chromium e2e in isolated consumer sandbox)
+node scripts/verify-browser-acceptance.mjs
+
+# 3. Full-stack measured load harness (HTTP + PG + SSE + concurrent clients)
+npm run interaction:load:measure
+
+# 4. Versioning & upgrade contracts verification
+node scripts/verify-version-and-upgrade-contracts.mjs
+```
+
+---
+
 ## License
 
 MIT © [th-efool](https://github.com/th-efool)

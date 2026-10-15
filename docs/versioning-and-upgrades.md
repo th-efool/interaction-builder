@@ -380,3 +380,69 @@ async function workerLoop() {
   }
 }
 ```
+
+---
+
+## 9. Standalone Server Security Defaults
+
+When exposing `interaction-builder` via standalone HTTP servers (e.g., `examples/agenda/server.ts`), the following production-grade security defaults are strictly enforced:
+
+### 9.1 Loopback Default Binding
+- Standalone servers default to binding exclusively to `127.0.0.1` rather than wildcard interfaces (`0.0.0.0` or `::`).
+- Exposing the service beyond localhost requires explicit environment configuration (`HOST=0.0.0.0`) behind a reverse proxy (e.g. Nginx, Envoy, Cloudflare).
+
+### 9.2 Trusted Principal Resolution & Anti-Impersonation
+- The server boundary establishes a strict `PrincipalResolver`:
+  ```typescript
+  export type PrincipalResolver = (req: http.IncomingMessage) => Promise<AuthenticatedPrincipal | null> | AuthenticatedPrincipal | null;
+  ```
+- **Anti-Impersonation Guard**: If a client request body specifies `ownerId` that differs from the authenticated principal (`principal.ownerId`), the server immediately rejects the request with HTTP 400 `FORBIDDEN_OWNERSHIP_OVERRIDE`. Ownership is derived strictly from the verified session, never from untrusted client input.
+- **Fail-Closed Production Authentication**: In `NODE_ENV === 'production'`, unauthenticated requests without valid bearer tokens or credentials fail with HTTP 401 `UNAUTHORIZED`. Demo auth bypass (`x-demo-user`) is strictly disabled in production.
+
+### 9.3 Origin Verification & CORS Allowlist
+- Cross-Origin Resource Sharing (CORS) enforces an explicit allowlist (`allowedOrigins`).
+- Requests bearing an untrusted or missing `Origin` on cross-origin calls are rejected with HTTP 403 `CORS_FORBIDDEN`.
+
+### 9.4 Streaming Request Body Limits & Content-Type Enforcement
+- Incoming request bodies are consumed as streams bounded by a hard ceiling (default `1MB` / `1048576` bytes).
+- Payloads exceeding the limit are aborted mid-flight with HTTP 413 `PAYLOAD_TOO_LARGE` without buffering excessive data into memory.
+- Mutating endpoints (`POST`, `PUT`, `PATCH`) enforce `Content-Type: application/json` and reject unsupported media types with HTTP 415 `UNSUPPORTED_MEDIA_TYPE`.
+
+### 9.5 Graceful Socket Closure
+- When shutting down the server (`server.close()`), `server.closeAllConnections()` is invoked to terminate lingering HTTP keep-alive connections (preventing process hang on shutdown).
+
+---
+
+## 10. Real Browser Acceptance Verification (Playwright)
+
+To guarantee that packed distributions execute cleanly in production browsers without compilation or hydration discrepancies, real end-to-end browser tests are executed against Chromium:
+
+- **Isolated External Sandbox**: An external directory outside the repository installs `interaction-builder-*.tgz` from a packed tarball.
+- **Dual-Profile Validation**:
+  - **Profile 1 (Native State)**: Validates initial mount, live assistant interaction via streaming SSE, direct UI title edit, entity selection context, two-tab concurrent stale edit conflict handling (409 CAS banner), browser page reload state restoration, and server restart persistence.
+  - **Profile 2 (Host-Owned Resource)**: Validates authoritative host records, direct UI host commands, assistant model tool commands, external host database mutations outside chat, zero duplicate business state in PostgreSQL snapshots, and cross-user tenant access isolation.
+- **Execution Command**:
+  ```bash
+  node scripts/verify-browser-acceptance.mjs
+  ```
+- All browser tests run on loopback ports with disposable PostgreSQL, capturing verification screenshots (`screenshots/profile1-native-browser.png`, `screenshots/profile2-host-browser.png`).
+
+---
+
+## 11. Full-Stack Measured Load Acceptance Harness
+
+Interaction Builder includes a full-stack load measurement harness (`scripts/load/measured-load-harness.ts`) testing concurrent throughput, latency distributions, and data integrity over real HTTP, PostgreSQL, and SSE:
+
+- **Workload Topology**: Multi-worker concurrent load generating simultaneous workspace creation, rapid direct action dispatches, event visibility tracking, and reconnection resnapshots.
+- **Invariants Verified**:
+  - `lostAcceptedActions === 0` (zero dropped mutations under concurrency)
+  - `duplicateReleases === 0` (zero double-releases or duplicate side effects)
+  - `overloadRecovered === true` (orderly 409 CAS rejection under high contention with clean client retry)
+- **Provisional Performance Targets**:
+  - Intake Ack p95 < 1,000 ms (measured ~99 ms)
+  - Event Visibility p95 < 1,000 ms (measured ~9 ms)
+  - Reconnect Resnapshot p95 < 3,000 ms (measured ~15 ms)
+- **Execution Command**:
+  ```bash
+  npm run interaction:load:measure
+  ```

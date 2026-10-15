@@ -87,8 +87,12 @@ export function AgendaViewer({
               className={`agenda-item ${isSelected ? 'selected' : ''}`}
               onClick={() => onSelectItem?.(isSelected ? null : item.id)}
             >
-              <div className="item-details">
-                <span className="item-title">
+              <div
+                className="item-details"
+                data-testid={`item-details-${item.id}`}
+                onClick={() => onSelectItem?.(isSelected ? null : item.id)}
+              >
+                <span className="item-title" data-testid={`item-title-${item.id}`}>
                   {item.title} ({item.durationMinutes}m) - {item.presenter} {item.pinned ? '[PINNED]' : ''}
                 </span>
                 {isSelected && <span className="selection-chip" data-testid="selected-indicator">Selected for context</span>}

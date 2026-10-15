@@ -145,6 +145,15 @@ export function HostAgendaViewer({
   );
 }
 
+function HostAgendaSyncController({ onSync }: { onSync: () => void }) {
+  const messages = useWorkspaceMessages();
+  const view = useWorkspaceView<any>();
+  useEffect(() => {
+    onSync();
+  }, [messages.length, view?.revision, view?.observedVersion]);
+  return null;
+}
+
 export function HostAgendaApp({
   meeting: initialMeeting,
   workspaceId,
@@ -163,7 +172,7 @@ export function HostAgendaApp({
 
   const refreshMeeting = async () => {
     try {
-      const res = await fetch(`${serverUrl}/api/host/meetings/${meeting.id}`, {
+      const res = await fetch(`${serverUrl}/api/host/meetings/${initialMeeting.id}`, {
         headers: { 'X-Owner-ID': ownerId },
       });
       if (res.ok) {
@@ -204,6 +213,7 @@ export function HostAgendaApp({
 
   return (
     <InteractionProvider workspaceId={workspaceId} transport={transport}>
+      <HostAgendaSyncController onSync={refreshMeeting} />
       <div className="host-agenda-app-container" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem' }}>
         <AgendaChat selectedItemId={selectedItemId} />
         <HostAgendaViewer
