@@ -744,6 +744,9 @@ var MemoryInteractionRepository = class {
     const now = params.now ?? /* @__PURE__ */ new Date();
     for (const run of this.runs.values()) {
       if (params.workspaceId && run.workspaceId !== params.workspaceId) continue;
+      const ws = this.workspaces.get(run.workspaceId);
+      if (params.supportedDomainIds && ws && !params.supportedDomainIds.includes(ws.domainId)) continue;
+      if (params.supportedDomainVersions && ws && !params.supportedDomainVersions.includes(ws.domainVersion)) continue;
       const isQueued = run.status === "queued";
       const isExpiredRunning = run.status === "running" && run.leaseUntil !== null && run.leaseUntil < now;
       if (isQueued || isExpiredRunning) {

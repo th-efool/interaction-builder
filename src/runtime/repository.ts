@@ -227,6 +227,8 @@ export interface InteractionRepository {
     leaseToken: string;
     leaseDurationMs: number;
     workspaceId?: string;
+    supportedDomainIds?: string[];
+    supportedDomainVersions?: number[];
     now?: Date;
   }): Promise<InteractionRunRecord | null>;
 

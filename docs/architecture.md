@@ -80,7 +80,7 @@ If the worker machine crashes immediately after committing an action to the data
 
 ### 5. Idempotent Request Ledger & Deterministic UUIDs
 Every step generates a deterministic `requestId` (`step:${runId}:${ordinal}`).
-In cohort tools and agenda tools:
+In host domain tools (e.g., agenda tools):
 ```ts
 const actionId = meta?.requestId ? deterministicUuid('action:' + meta.requestId) : crypto.randomUUID();
 ```

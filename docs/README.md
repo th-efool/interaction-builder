@@ -62,3 +62,15 @@ How to write rock-solid tests without hitting production databases or external L
 - Scripted mock language models (`createScriptedModelAdapter`)
 - Headless DOM component tests with jsdom and `@testing-library/react`
 - Architectural boundary enforcement tests
+
+### 9. [Versioning, Upgrades & Clean-Host Installation](./versioning-and-upgrades.md)
+Authoritative specification for contracts, upgrades, and host integration:
+- Package version (`0.1.0`) vs Wire protocol version (`PROTOCOL_VERSION = 1`)
+- Domain versions (`domainVersion`) and handler versions (`handlerVersion`)
+- Division of responsibilities matrix (Package vs Host Application)
+- Additive database migration rules and transactional DDL
+- Rolling upgrade strategies (drain, multi-version worker filtering, in-place reconcile)
+- Safe downgrade limitations and failure boundaries
+- Native-state (Profile 1) vs Host-owned resource (Profile 2) profiles
+- Clean-host installation checklist and setup guide
+

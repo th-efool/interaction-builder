@@ -8,7 +8,15 @@ import {
 } from './host-agenda.domain';
 
 export class HostAgendaService {
-  constructor(private repo: HostAgendaRepository) {}
+  private repo: HostAgendaRepository;
+
+  constructor(repoOrDeps: HostAgendaRepository | { repo: HostAgendaRepository }) {
+    if (repoOrDeps && typeof repoOrDeps === 'object' && 'repo' in repoOrDeps) {
+      this.repo = (repoOrDeps as any).repo;
+    } else {
+      this.repo = repoOrDeps as HostAgendaRepository;
+    }
+  }
 
   async getMeeting(ownerId: string, meetingId: string): Promise<HostAgendaMeeting | null> {
     return this.repo.getMeeting(ownerId, meetingId);

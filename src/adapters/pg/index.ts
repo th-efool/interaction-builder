@@ -534,14 +534,23 @@ export function createPgInteractionRepository(options: PgAdapterOptions): PgInte
     async claimRun(params) {
       const now = params.now ?? new Date();
       return withTransaction(async client => {
-        let query = `SELECT "id", "workspaceId" FROM "interaction_runs"
-                     WHERE ("status" = 'queued' OR ("status" = 'running' AND "leaseUntil" < $1))`;
+        let query = `SELECT r."id", r."workspaceId" FROM "interaction_runs" r
+                     JOIN "interaction_workspaces" w ON w."id" = r."workspaceId"
+                     WHERE (r."status" = 'queued' OR (r."status" = 'running' AND r."leaseUntil" < $1))`;
         const queryParams: any[] = [now];
         if (params.workspaceId) {
-          query += ` AND "workspaceId" = $2`;
           queryParams.push(params.workspaceId);
+          query += ` AND r."workspaceId" = $${queryParams.length}`;
         }
-        query += ` ORDER BY "createdAt" ASC LIMIT 1 FOR UPDATE SKIP LOCKED`;
+        if (params.supportedDomainIds && params.supportedDomainIds.length > 0) {
+          queryParams.push(params.supportedDomainIds);
+          query += ` AND w."domainId" = ANY($${queryParams.length})`;
+        }
+        if (params.supportedDomainVersions && params.supportedDomainVersions.length > 0) {
+          queryParams.push(params.supportedDomainVersions);
+          query += ` AND w."domainVersion" = ANY($${queryParams.length})`;
+        }
+        query += ` ORDER BY r."createdAt" ASC LIMIT 1 FOR UPDATE OF r SKIP LOCKED`;
 
         const candRes = await client.query(query, queryParams);
         if (candRes.rows.length === 0) return null;

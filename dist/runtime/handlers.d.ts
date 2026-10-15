@@ -4,6 +4,8 @@ import type { InteractionRepository } from './repository';
 export interface DomainDefinition<State = any> {
     id: string;
     version: number;
+    /** Optional multi-version compatibility check for rolling upgrades */
+    supportsVersion?: (version: number) => boolean;
     /** Validate + build initial state from client bootstrap. */
     initialState(bootstrap: unknown): State;
     plan(state: State, action: unknown, ctx: {

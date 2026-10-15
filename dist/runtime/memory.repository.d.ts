@@ -63,6 +63,8 @@ export declare class MemoryInteractionRepository implements InteractionRepositor
         leaseToken: string;
         leaseDurationMs: number;
         workspaceId?: string;
+        supportedDomainIds?: string[];
+        supportedDomainVersions?: number[];
         now?: Date;
     }): Promise<InteractionRunRecord | null>;
     heartbeatRun(params: {

@@ -1,5 +1,10 @@
 // src/core/contracts.ts
 import { z } from "zod";
+var PROTOCOL_VERSION = 1;
+var PACKAGE_VERSION = "0.1.0";
+function isSupportedProtocolVersion(version) {
+  return version === PROTOCOL_VERSION;
+}
 var entityRefSchema = z.strictObject({
   kind: z.string().min(1).max(80),
   id: z.string().min(1).max(200),
@@ -288,6 +293,8 @@ function reduceInteraction(state, input) {
   return { ...state, sequence: event.sequence };
 }
 export {
+  PACKAGE_VERSION,
+  PROTOCOL_VERSION,
   actionEnvelopeSchema,
   applyJsonPatch,
   changeReceiptSchema,
@@ -301,6 +308,7 @@ export {
   interactionEventSchema,
   interactionMessageSchema,
   invertJsonPatch,
+  isSupportedProtocolVersion,
   messagePartSchema,
   reduceInteraction
 };

@@ -92,6 +92,11 @@ export async function runAssistantTurn<State>(
   const ws = await repo.loadWorkspace<State>({ workspaceId, ownerId });
   if (!ws) throw new Error('WORKSPACE_NOT_FOUND');
   if (ws.lifecycle !== 'active') throw new Error('WORKSPACE_NOT_ACTIVE');
+  if (ws.domainId !== domain.id) throw new Error(`DOMAIN_MISMATCH: Workspace domain is "${ws.domainId}" but runner domain is "${domain.id}"`);
+  const isDomainVersionSupported = domain.supportsVersion ? domain.supportsVersion(ws.domainVersion) : domain.version === ws.domainVersion;
+  if (!isDomainVersionSupported) {
+    throw new Error(`UNSUPPORTED_DOMAIN_VERSION: Workspace domain version ${ws.domainVersion} is not supported by runner for domain "${domain.id}" (supported: ${domain.version})`);
+  }
 
   let observedRevision = opts.observedRevision ?? ws.revision;
   let triggeringMessageId: string | null = null;

@@ -1,5 +1,12 @@
 import { z } from 'zod';
 
+export const PROTOCOL_VERSION = 1;
+export const PACKAGE_VERSION = '0.1.0';
+
+export function isSupportedProtocolVersion(version: number): boolean {
+  return version === PROTOCOL_VERSION;
+}
+
 export const entityRefSchema = z.strictObject({
   kind: z.string().min(1).max(80),
   id: z.string().min(1).max(200),

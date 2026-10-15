@@ -485,11 +485,16 @@ export class MemoryInteractionRepository implements InteractionRepository {
     leaseToken: string;
     leaseDurationMs: number;
     workspaceId?: string;
+    supportedDomainIds?: string[];
+    supportedDomainVersions?: number[];
     now?: Date;
   }): Promise<InteractionRunRecord | null> {
     const now = params.now ?? new Date();
     for (const run of this.runs.values()) {
       if (params.workspaceId && run.workspaceId !== params.workspaceId) continue;
+      const ws = this.workspaces.get(run.workspaceId);
+      if (params.supportedDomainIds && ws && !params.supportedDomainIds.includes(ws.domainId)) continue;
+      if (params.supportedDomainVersions && ws && !params.supportedDomainVersions.includes(ws.domainVersion)) continue;
       const isQueued = run.status === 'queued';
       const isExpiredRunning = run.status === 'running' && run.leaseUntil !== null && run.leaseUntil < now;
       if (isQueued || isExpiredRunning) {

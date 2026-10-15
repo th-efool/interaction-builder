@@ -20,20 +20,54 @@ import { startHostAgendaWorker } from './host-agenda.worker';
 
 const PgPool = (pg as any)?.Pool ?? (pg as any)?.default?.Pool ?? pg.Pool;
 
+export interface Principal {
+  ownerId: string;
+  role?: string;
+}
+
+export type PrincipalResolver = (req: http.IncomingMessage) => Promise<Principal | null>;
+
 export interface ServerOptions {
+  host?: string;
   port?: number;
   databaseUrl?: string;
   enableEmbeddedWorker?: boolean;
+  principalResolver?: PrincipalResolver;
+  allowInsecureDemoAuth?: boolean;
+  allowedOrigins?: string[];
+  maxBodyBytes?: number;
+  autoMigrate?: boolean;
 }
 
 export async function createAgendaServer(options: ServerOptions = {}) {
+  const host = options.host ?? process.env.HOST ?? '127.0.0.1';
   const port = options.port ?? Number(process.env.PORT || 3030);
   const databaseUrl = options.databaseUrl ?? process.env.DATABASE_URL;
+
+  const isProduction = process.env.NODE_ENV === 'production';
+  const isLoopback = host === '127.0.0.1' || host === 'localhost' || host === '::1';
+
+  // Determine if insecure demo auth (X-Owner-ID or default fallback) is permitted
+  const allowInsecureDemoAuth =
+    options.allowInsecureDemoAuth ??
+    (process.env.ALLOW_INSECURE_DEMO_AUTH === 'true' || (!isProduction && isLoopback));
+
+  if (isProduction && options.allowInsecureDemoAuth) {
+    throw new Error('SECURITY_ERROR: Insecure demo authentication is strictly forbidden in production mode (NODE_ENV=production).');
+  }
+
+  if (!isLoopback && allowInsecureDemoAuth && options.allowInsecureDemoAuth === undefined) {
+    throw new Error(
+      `SECURITY_ERROR: Insecure demo authentication cannot bind to non-loopback host (${host}) without explicit ServerOptions.allowInsecureDemoAuth opt-in.`
+    );
+  }
 
   let repo;
   let hostRepo: HostAgendaRepository;
   let pool: pg.Pool | undefined;
   const isPg = Boolean(databaseUrl && databaseUrl !== 'memory');
+
+  const shouldAutoMigrate = options.autoMigrate ?? (process.env.AUTO_MIGRATE === 'true' || !isProduction);
 
   if (isPg) {
     const pgPool = new PgPool({ connectionString: databaseUrl });
@@ -42,24 +76,26 @@ export async function createAgendaServer(options: ServerOptions = {}) {
     });
     pool = pgPool;
 
-    // Apply standard schema migration for interaction engine
-    const migrationDir = path.resolve(
-      path.dirname(fileURLToPath(import.meta.url)),
-      '../../migrations/001_interaction_schema.sql'
-    );
-    if (fs.existsSync(migrationDir)) {
-      const sql = fs.readFileSync(migrationDir, 'utf8');
-      await pgPool.query(sql);
-    }
+    if (shouldAutoMigrate) {
+      // Apply standard schema migration for interaction engine
+      const migrationDir = path.resolve(
+        path.dirname(fileURLToPath(import.meta.url)),
+        '../../migrations/001_interaction_schema.sql'
+      );
+      if (fs.existsSync(migrationDir)) {
+        const sql = fs.readFileSync(migrationDir, 'utf8');
+        await pgPool.query(sql);
+      }
 
-    // Apply host-owned business schema migration
-    const hostMigrationPath = path.resolve(
-      path.dirname(fileURLToPath(import.meta.url)),
-      'host-schema.sql'
-    );
-    if (fs.existsSync(hostMigrationPath)) {
-      const hostSql = fs.readFileSync(hostMigrationPath, 'utf8');
-      await pgPool.query(hostSql);
+      // Apply host-owned business schema migration
+      const hostMigrationPath = path.resolve(
+        path.dirname(fileURLToPath(import.meta.url)),
+        'host-schema.sql'
+      );
+      if (fs.existsSync(hostMigrationPath)) {
+        const hostSql = fs.readFileSync(hostMigrationPath, 'utf8');
+        await pgPool.query(hostSql);
+      }
     }
 
     repo = createPgInteractionRepository({ pool: pgPool });
@@ -86,11 +122,46 @@ export async function createAgendaServer(options: ServerOptions = {}) {
     workerHandle = startAgendaWorker({ repo, pool, hostService, pollIntervalMs: 250 });
   }
 
+  const allowedOrigins =
+    options.allowedOrigins ??
+    (process.env.ALLOWED_ORIGINS
+      ? process.env.ALLOWED_ORIGINS.split(',').map((s) => s.trim())
+      : [
+          'http://localhost:3000',
+          'http://127.0.0.1:3000',
+          'http://localhost:3030',
+          'http://127.0.0.1:3030',
+          'http://localhost:5173',
+          'http://127.0.0.1:5173',
+          `http://${host}:${port}`,
+          `http://localhost:${port}`,
+          `http://127.0.0.1:${port}`,
+        ]);
+
+  const maxBodyBytes =
+    options.maxBodyBytes ?? (process.env.MAX_BODY_BYTES ? Number(process.env.MAX_BODY_BYTES) : 1024 * 1024); // 1MB default
+
   const server = http.createServer(async (req, res) => {
-    // CORS headers
-    res.setHeader('Access-Control-Allow-Origin', '*');
+    // -------------------------------------------------------------
+    // 1. CORS Validation & Allowed Origin Pre-flight
+    // -------------------------------------------------------------
+    const origin = req.headers.origin;
+    if (origin) {
+      const isAllowed = allowedOrigins.includes(origin) || allowedOrigins.includes('*');
+      if (!isAllowed) {
+        res.writeHead(403, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ code: 'CORS_FORBIDDEN', error: `Origin "${origin}" is not allowed.` }));
+        return;
+      }
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Vary', 'Origin');
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+    }
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Idempotency-Key, Last-Event-ID, X-Owner-ID');
+    res.setHeader(
+      'Access-Control-Allow-Headers',
+      'Content-Type, Authorization, Idempotency-Key, Last-Event-ID, X-Owner-ID'
+    );
 
     if (req.method === 'OPTIONS') {
       res.writeHead(204);
@@ -98,25 +169,89 @@ export async function createAgendaServer(options: ServerOptions = {}) {
       return;
     }
 
-    const host = req.headers.host || `localhost:${port}`;
-    const url = new URL(req.url || '/', `http://${host}`);
+    const hostHeader = req.headers.host || `${host}:${port}`;
+    const url = new URL(req.url || '/', `http://${hostHeader}`);
 
+    // Health check endpoint (safe, bounded, zero data exposure)
     if (url.pathname === '/health') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ status: 'ok', storage: isPg ? 'postgres' : 'memory' }));
+      res.end(JSON.stringify({ status: 'ok', storage: isPg ? 'postgres' : 'memory', loopback: isLoopback }));
       return;
     }
 
-    // Read incoming body buffer
+    // -------------------------------------------------------------
+    // 2. Streaming Request Body & Byte Limit Enforcement
+    // -------------------------------------------------------------
+    let bytesRead = 0;
+    let payloadExceeded = false;
     const chunks: Buffer[] = [];
+
     for await (const chunk of req) {
-      chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk);
+      const buf = typeof chunk === 'string' ? Buffer.from(chunk) : chunk;
+      bytesRead += buf.length;
+      if (bytesRead > maxBodyBytes) {
+        payloadExceeded = true;
+        break;
+      }
+      chunks.push(buf);
     }
+
+    if (payloadExceeded) {
+      res.writeHead(413, { 'Content-Type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          code: 'PAYLOAD_TOO_LARGE',
+          error: `Request body exceeds maximum size limit of ${maxBodyBytes} bytes.`,
+        })
+      );
+      return;
+    }
+
     const bodyBuffer = Buffer.concat(chunks);
-    const ownerId = (req.headers['x-owner-id'] as string) || 'agenda-user-default';
 
     // -------------------------------------------------------------
-    // Host-Owned Business Resource Endpoints
+    // 3. Content-Type and Method Validation
+    // -------------------------------------------------------------
+    if (['POST', 'PUT', 'PATCH'].includes(req.method || '')) {
+      const contentType = req.headers['content-type'] || '';
+      if (bodyBuffer.length > 0 && !contentType.toLowerCase().includes('application/json')) {
+        res.writeHead(415, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ code: 'UNSUPPORTED_MEDIA_TYPE', error: 'Content-Type must be application/json.' }));
+        return;
+      }
+    }
+
+    // -------------------------------------------------------------
+    // 4. Trusted Principal Resolution
+    // -------------------------------------------------------------
+    let principal: Principal | null = null;
+    if (options.principalResolver) {
+      principal = await options.principalResolver(req);
+    } else if (allowInsecureDemoAuth) {
+      // Insecure demo mode: accept header or use default demo user
+      const headerOwner = req.headers['x-owner-id'];
+      if (typeof headerOwner === 'string' && headerOwner.trim().length > 0) {
+        principal = { ownerId: headerOwner.trim() };
+      } else {
+        principal = { ownerId: 'agenda-user-default' };
+      }
+    }
+
+    if (!principal) {
+      res.writeHead(401, { 'Content-Type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          code: 'UNAUTHORIZED',
+          error: 'Authentication required. No valid principal could be resolved.',
+        })
+      );
+      return;
+    }
+
+    const trustedOwnerId = principal.ownerId;
+
+    // -------------------------------------------------------------
+    // 5. Host-Owned Business Resource Endpoints
     // -------------------------------------------------------------
     if (url.pathname.startsWith('/api/host/meetings')) {
       const subpath = url.pathname.slice('/api/host/meetings'.length);
@@ -125,10 +260,30 @@ export async function createAgendaServer(options: ServerOptions = {}) {
       try {
         // POST /api/host/meetings (Create meeting)
         if (segments.length === 0 && req.method === 'POST') {
-          const body = JSON.parse(bodyBuffer.toString('utf8') || '{}');
+          let body: any = {};
+          try {
+            body = JSON.parse(bodyBuffer.toString('utf8') || '{}');
+          } catch {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ code: 'INVALID_JSON', error: 'Malformed JSON payload.' }));
+            return;
+          }
+
+          // Anti-impersonation: forbid client override of ownerId
+          if (body.ownerId && body.ownerId !== trustedOwnerId) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(
+              JSON.stringify({
+                code: 'FORBIDDEN_OWNERSHIP_OVERRIDE',
+                error: 'Cannot create meeting for an owner other than the authenticated principal.',
+              })
+            );
+            return;
+          }
+
           const meeting: HostAgendaMeeting = {
             id: body.id || crypto.randomUUID(),
-            ownerId: body.ownerId || ownerId,
+            ownerId: trustedOwnerId, // Bound strictly to authenticated principal
             version: 0,
             meetingTitle: body.meetingTitle || 'New Meeting',
             date: body.date || new Date().toISOString().split('T')[0],
@@ -153,7 +308,7 @@ export async function createAgendaServer(options: ServerOptions = {}) {
         // GET /api/host/meetings/:id (Authoritative read)
         if (segments.length === 1 && req.method === 'GET') {
           const meetingId = segments[0];
-          const meeting = await hostService.getMeeting(ownerId, meetingId);
+          const meeting = await hostService.getMeeting(trustedOwnerId, meetingId);
           if (!meeting) {
             res.writeHead(404, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ code: 'NOT_FOUND', error: 'Meeting not found.' }));
@@ -167,7 +322,27 @@ export async function createAgendaServer(options: ServerOptions = {}) {
         // POST /api/host/meetings/:id/commands (Authorized typed command execution)
         if (segments.length === 2 && segments[1] === 'commands' && req.method === 'POST') {
           const meetingId = segments[0];
-          const body = JSON.parse(bodyBuffer.toString('utf8') || '{}');
+          let body: any = {};
+          try {
+            body = JSON.parse(bodyBuffer.toString('utf8') || '{}');
+          } catch {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ code: 'INVALID_JSON', error: 'Malformed JSON payload.' }));
+            return;
+          }
+
+          // Anti-impersonation: forbid client override of ownerId
+          if (body.ownerId && body.ownerId !== trustedOwnerId) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(
+              JSON.stringify({
+                code: 'FORBIDDEN_OWNERSHIP_OVERRIDE',
+                error: 'Command ownerId does not match the authenticated principal.',
+              })
+            );
+            return;
+          }
+
           const commandId =
             (req.headers['idempotency-key'] as string) ||
             body.commandId ||
@@ -175,7 +350,7 @@ export async function createAgendaServer(options: ServerOptions = {}) {
 
           const receipt = await hostService.executeCommand({
             commandId,
-            ownerId,
+            ownerId: trustedOwnerId, // Bound strictly to authenticated principal
             resourceId: meetingId,
             expectedVersion: body.expectedVersion,
             readSet: body.readSet,
@@ -208,13 +383,13 @@ export async function createAgendaServer(options: ServerOptions = {}) {
           return;
         }
         res.writeHead(500, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ code: 'INTERNAL_ERROR', error: msg }));
+        res.end(JSON.stringify({ code: 'INTERNAL_ERROR', error: 'Internal operation failed.' }));
         return;
       }
     }
 
     // -------------------------------------------------------------
-    // Interaction Builder Orchestration Endpoints
+    // 6. Interaction Builder Orchestration Endpoints
     // -------------------------------------------------------------
     if (url.pathname.startsWith('/api/interaction/v1/')) {
       const segments = url.pathname.slice('/api/interaction/v1/'.length).split('/').filter(Boolean);
@@ -223,7 +398,7 @@ export async function createAgendaServer(options: ServerOptions = {}) {
       for (const [key, value] of Object.entries(req.headers)) {
         if (value) {
           if (Array.isArray(value)) {
-            value.forEach(v => webHeaders.append(key, v));
+            value.forEach((v) => webHeaders.append(key, v));
           } else {
             webHeaders.set(key, value);
           }
@@ -240,7 +415,7 @@ export async function createAgendaServer(options: ServerOptions = {}) {
         const response = await dispatchInteraction(
           webRequest,
           segments,
-          async () => ownerId,
+          async () => trustedOwnerId, // Bound strictly to authenticated principal
           handlers
         );
 
@@ -254,7 +429,7 @@ export async function createAgendaServer(options: ServerOptions = {}) {
       } catch (err: any) {
         if (!res.headersSent) {
           res.writeHead(500, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: err.message || 'Internal error' }));
+          res.end(JSON.stringify({ error: 'Internal interaction error' }));
         }
       }
       return;
@@ -266,15 +441,17 @@ export async function createAgendaServer(options: ServerOptions = {}) {
 
   return {
     server,
+    host,
     port,
     repo,
     hostRepo,
     hostService,
     async start(): Promise<string> {
-      return new Promise((resolve) => {
-        server.listen(port, () => {
-          console.log(`[Agenda Server] Listening on http://localhost:${port} (${isPg ? 'PostgreSQL' : 'memory'})`);
-          resolve(`http://localhost:${port}`);
+      return new Promise((resolve, reject) => {
+        server.on('error', reject);
+        server.listen(port, host, () => {
+          console.log(`[Agenda Server] Listening on http://${host}:${port} (${isPg ? 'PostgreSQL' : 'memory'})`);
+          resolve(`http://${host}:${port}`);
         });
       });
     },
@@ -306,7 +483,7 @@ export async function runStandaloneServer() {
 }
 
 if (process.argv[1]?.endsWith('server.ts') || process.argv[1]?.endsWith('server.js')) {
-  void runStandaloneServer().catch(err => {
+  void runStandaloneServer().catch((err) => {
     console.error('Server failed to start:', err);
     process.exit(1);
   });

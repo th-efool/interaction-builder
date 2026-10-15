@@ -6,6 +6,8 @@ import type { InteractionRepository } from './repository';
 export interface DomainDefinition<State = any> {
   id: string;
   version: number;
+  /** Optional multi-version compatibility check for rolling upgrades */
+  supportsVersion?: (version: number) => boolean;
   /** Validate + build initial state from client bootstrap. */
   initialState(bootstrap: unknown): State;
   plan(
@@ -307,6 +309,17 @@ export function createInteractionHandlers(deps: InteractionHandlerDeps) {
         if (!ws) return toErrorResult(new Error('WORKSPACE_NOT_FOUND'));
         const domain = deps.domains.get(ws.domainId);
         if (!domain) return toErrorResult(new Error('UNKNOWN_DOMAIN'));
+        const isSupported = domain.supportsVersion ? domain.supportsVersion(ws.domainVersion) : domain.version === ws.domainVersion;
+        if (!isSupported) {
+          return {
+            status: 400,
+            body: {
+              code: 'UNSUPPORTED_DOMAIN_VERSION',
+              message: `Domain "${domain.id}" does not support workspace version ${ws.domainVersion} (supported: ${domain.version})`,
+              retryable: false,
+            },
+          };
+        }
         const res = await deps.repo.commitAction({
           workspaceId: ws.id,
           ownerId,

@@ -1,4 +1,7 @@
 import { z } from 'zod';
+export declare const PROTOCOL_VERSION = 1;
+export declare const PACKAGE_VERSION = "0.1.0";
+export declare function isSupportedProtocolVersion(version: number): boolean;
 export declare const entityRefSchema: z.ZodObject<{
     kind: z.ZodString;
     id: z.ZodString;

@@ -404,6 +404,17 @@ function createInteractionHandlers(deps) {
         if (!ws) return toErrorResult(new Error("WORKSPACE_NOT_FOUND"));
         const domain = deps.domains.get(ws.domainId);
         if (!domain) return toErrorResult(new Error("UNKNOWN_DOMAIN"));
+        const isSupported = domain.supportsVersion ? domain.supportsVersion(ws.domainVersion) : domain.version === ws.domainVersion;
+        if (!isSupported) {
+          return {
+            status: 400,
+            body: {
+              code: "UNSUPPORTED_DOMAIN_VERSION",
+              message: `Domain "${domain.id}" does not support workspace version ${ws.domainVersion} (supported: ${domain.version})`,
+              retryable: false
+            }
+          };
+        }
         const res = await deps.repo.commitAction({
           workspaceId: ws.id,
           ownerId,
@@ -451,6 +462,11 @@ async function runAssistantTurn(opts) {
   const ws = await repo.loadWorkspace({ workspaceId, ownerId });
   if (!ws) throw new Error("WORKSPACE_NOT_FOUND");
   if (ws.lifecycle !== "active") throw new Error("WORKSPACE_NOT_ACTIVE");
+  if (ws.domainId !== domain.id) throw new Error(`DOMAIN_MISMATCH: Workspace domain is "${ws.domainId}" but runner domain is "${domain.id}"`);
+  const isDomainVersionSupported = domain.supportsVersion ? domain.supportsVersion(ws.domainVersion) : domain.version === ws.domainVersion;
+  if (!isDomainVersionSupported) {
+    throw new Error(`UNSUPPORTED_DOMAIN_VERSION: Workspace domain version ${ws.domainVersion} is not supported by runner for domain "${domain.id}" (supported: ${domain.version})`);
+  }
   let observedRevision = opts.observedRevision ?? ws.revision;
   let triggeringMessageId = null;
   if (runId) {
@@ -1062,6 +1078,9 @@ var MemoryInteractionRepository = class {
     const now = params.now ?? /* @__PURE__ */ new Date();
     for (const run of this.runs.values()) {
       if (params.workspaceId && run.workspaceId !== params.workspaceId) continue;
+      const ws = this.workspaces.get(run.workspaceId);
+      if (params.supportedDomainIds && ws && !params.supportedDomainIds.includes(ws.domainId)) continue;
+      if (params.supportedDomainVersions && ws && !params.supportedDomainVersions.includes(ws.domainVersion)) continue;
       const isQueued = run.status === "queued";
       const isExpiredRunning = run.status === "running" && run.leaseUntil !== null && run.leaseUntil < now;
       if (isQueued || isExpiredRunning) {

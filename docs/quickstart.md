@@ -139,7 +139,7 @@ Use standard Web Fetch Request / Response dispatcher:
 import { createPgInteractionRepository } from 'interaction-builder/adapters/pg';
 import { createInteractionHandlers } from 'interaction-builder/runtime';
 import { dispatchInteraction } from 'interaction-builder/adapters/http';
-import { kanbanDomain } from '@/src/domain/kanban';
+import { kanbanDomain } from './domain/kanban';
 
 const repo = createPgInteractionRepository({
   connectionString: process.env.DATABASE_URL!,
@@ -182,7 +182,7 @@ import {
   useSendMessage,
   useDispatchAction,
 } from 'interaction-builder/react';
-import type { KanbanWorkspace, KanbanAction } from '@/src/domain/kanban';
+import type { KanbanWorkspace, KanbanAction } from '../domain/kanban';
 
 export function KanbanApp({ workspaceId, initial }: { workspaceId: string; initial: KanbanWorkspace }) {
   return (

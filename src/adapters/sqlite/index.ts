@@ -510,10 +510,26 @@ export function createSqliteInteractionRepository(driver: SqliteDriver): Interac
     async claimRun(params) {
       await ensureInit();
       const now = new Date().toISOString();
-      const rows = await driver.query<any>(
-        `SELECT * FROM interaction_runs WHERE status = 'queued' OR (status = 'running' AND leaseUntil < ?) ORDER BY createdAt ASC LIMIT 1`,
-        [now]
-      );
+      let query = `SELECT r.* FROM interaction_runs r
+                   JOIN interaction_workspaces w ON w.id = r.workspaceId
+                   WHERE (r.status = 'queued' OR (r.status = 'running' AND r.leaseUntil < ?))`;
+      const queryParams: any[] = [now];
+      if (params.workspaceId) {
+        query += ` AND r.workspaceId = ?`;
+        queryParams.push(params.workspaceId);
+      }
+      if (params.supportedDomainIds && params.supportedDomainIds.length > 0) {
+        const placeholders = params.supportedDomainIds.map(() => '?').join(',');
+        query += ` AND w.domainId IN (${placeholders})`;
+        queryParams.push(...params.supportedDomainIds);
+      }
+      if (params.supportedDomainVersions && params.supportedDomainVersions.length > 0) {
+        const placeholders = params.supportedDomainVersions.map(() => '?').join(',');
+        query += ` AND w.domainVersion IN (${placeholders})`;
+        queryParams.push(...params.supportedDomainVersions);
+      }
+      query += ` ORDER BY r.createdAt ASC LIMIT 1`;
+      const rows = await driver.query<any>(query, queryParams);
       if (rows.length === 0) return null;
       const run = rows[0];
       const leaseUntil = new Date(Date.now() + params.leaseDurationMs).toISOString();

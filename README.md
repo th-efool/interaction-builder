@@ -6,7 +6,7 @@
 
 **Deterministic conversational interaction engine with transactional persistence, tool execution, and UI synchronization.**
 
-Interaction Builder allows you to build AI-powered collaborative workspaces (cohort planners, canvas editors, kanban boards, document suites) where **users and AI assistants collaborate on the exact same live state** with transactional durability, optimistic UI updates, and zero state desynchronization.
+Interaction Builder allows you to build AI-powered collaborative workspaces (canvas editors, kanban boards, document suites, meeting planners) where **users and AI assistants collaborate on the exact same live state** with transactional durability, optimistic UI updates, and zero state desynchronization.
 
 ---
 
@@ -42,6 +42,7 @@ Explore the complete documentation in [`docs/`](./docs/README.md):
 - 🔌 **[Adapters Guide](./docs/adapters-guide.md)**: PostgreSQL (`pg.Pool`), AI SDK, and Web standard HTTP
 - 🧪 **[Testing Guide](./docs/testing-guide.md)**: Unit, integration, and headless component testing with `testkit`
 - 🛠️ **[Custom Domain Walkthrough](./docs/custom-domain-example.md)**: Full tutorial building a Meeting Agenda domain
+- 🔄 **[Versioning, Upgrades & Installation](./docs/versioning-and-upgrades.md)**: Protocol/domain contracts, additive migrations, rolling upgrades, and clean-host checklist
 
 ---
 
