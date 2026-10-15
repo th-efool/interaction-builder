@@ -1,6 +1,6 @@
 import { useCallback, useRef, useSyncExternalStore } from 'react';
 import { useInteractionStore } from './provider';
-import type { StoreState } from '../client/store';
+import type { HistoryEntry, StoreState } from '../client/store';
 import type { EntityRef } from '../core/contracts';
 
 export function useInteractionState<View = unknown>(): StoreState<View> {
@@ -106,10 +106,23 @@ export function useRunAssistant() {
   }, [store]);
 }
 
+export interface InteractionHistoryState<View = unknown> {
+  undo: () => boolean;
+  redo: () => boolean;
+  timeTravel: (revision: number) => boolean;
+  resetTimeTravel: () => void;
+  past: HistoryEntry<View>[];
+  future: HistoryEntry<View>[];
+  canUndo: boolean;
+  canRedo: boolean;
+  isTimeTraveling: boolean;
+  activeRevision: number;
+}
+
 /**
  * Access time-travel history, undo/redo triggers, and revision navigation.
  */
-export function useInteractionHistory<View = unknown>() {
+export function useInteractionHistory<View = unknown>(): InteractionHistoryState<View> {
   const store = useInteractionStore<View>();
   const history = useSyncExternalStore(
     store.subscribe,

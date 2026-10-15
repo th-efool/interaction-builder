@@ -1,4 +1,4 @@
-import type { StoreState } from '../client/store';
+import type { HistoryEntry, StoreState } from '../client/store';
 import type { EntityRef } from '../core/contracts';
 export declare function useInteractionState<View = unknown>(): StoreState<View>;
 /**
@@ -54,21 +54,22 @@ export declare function useSendMessage(): (text: string, entityRefs?: Array<{
     label: string;
 }>) => Promise<boolean>;
 export declare function useRunAssistant(): () => Promise<boolean>;
-/**
- * Access time-travel history, undo/redo triggers, and revision navigation.
- */
-export declare function useInteractionHistory<View = unknown>(): {
+export interface InteractionHistoryState<View = unknown> {
     undo: () => boolean;
     redo: () => boolean;
     timeTravel: (revision: number) => boolean;
     resetTimeTravel: () => void;
-    past: import("..").HistoryEntry<View>[];
-    future: import("..").HistoryEntry<View>[];
+    past: HistoryEntry<View>[];
+    future: HistoryEntry<View>[];
     canUndo: boolean;
     canRedo: boolean;
     isTimeTraveling: boolean;
     activeRevision: number;
-};
+}
+/**
+ * Access time-travel history, undo/redo triggers, and revision navigation.
+ */
+export declare function useInteractionHistory<View = unknown>(): InteractionHistoryState<View>;
 /**
  * Check if the current browser tab is the active SSE Leader tab in cross-tab sync mode.
  */

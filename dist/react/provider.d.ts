@@ -5,7 +5,7 @@ export interface InteractionProviderProps<View> {
     initialView?: View;
     transport?: InteractionTransport<View>;
     store?: InteractionStore<View>;
-    children: React.ReactNode;
+    children?: React.ReactNode;
 }
 export declare const InteractionContext: React.Context<InteractionStore<any> | null>;
 export declare function InteractionProvider<View>({ workspaceId, initialView, transport, store: externalStore, children, }: InteractionProviderProps<View>): React.JSX.Element;

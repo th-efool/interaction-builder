@@ -62,9 +62,11 @@
     "dist",
     "migrations",
     "README.md",
-    "docs",
-    "Documentation"
+    "docs"
   ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "scripts": {
     "build": "node build.mjs",
     "test": "vitest run"

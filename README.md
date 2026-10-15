@@ -45,21 +45,24 @@ Explore the complete documentation in [`docs/`](./docs/README.md):
 
 ---
 
-## Subpath Exports
+## Subpath Exports & Profiles
 
-The package is strictly modularized with zero leakage of server/database code into browser bundles:
+The package provides strict subpath isolation so consumers only bundle and install what their runtime environment requires:
 
-| Export | Environment | Description |
-|---|---|---|
-| `interaction-builder/core` | Browser & Server | Schemas, action envelopes, receipts, entity refs, events, and optimistic reducer. |
-| `interaction-builder/runtime` | Server only | Generic repository interface, action planning service, handlers, runner loop, deterministic UUIDs. |
-| `interaction-builder/client` | Browser | Reactive external store, HTTP transport, and SSE stream parser. |
-| `interaction-builder/react` | React (Browser) | `<InteractionProvider>`, `useWorkspaceView`, `useWorkspaceRevision`, `useSendMessage`, `useDispatchAction`. |
-| `interaction-builder/adapters/pg` | Server (Node.js) | Pure PostgreSQL repository using native `pg.Pool` without ORM dependencies. |
-| `interaction-builder/adapters/sqlite` | Server / Edge / Local | Universal SQLite / LibSQL repository for local dev, desktop, Turso, Cloudflare D1. |
-| `interaction-builder/adapters/http` | Server (Web) | Web Fetch standard `Request` / `Response` dispatcher for Next.js, Express, or Fastify. |
-| `interaction-builder/adapters/ai` | Server | Vercel AI SDK adapter (`createAiSdkModelAdapter`) with error boundaries and abort signaling. |
-| `interaction-builder/testkit` | Tests | `MemoryInteractionRepository`, scripted mock models, and reference domain fixtures. |
+| Export | Environment | Required Dependencies | Description |
+|---|---|---|---|
+| `interaction-builder` | Node.js (Isomorphic) | `zod` | Combined barrel exporting `core`, `runtime`, and `client`. |
+| `interaction-builder/core` | Universal (Browser & Server) | `zod` | Schemas, action envelopes, receipts, entity refs, events, and pure reducer. Zero server dependencies. |
+| `interaction-builder/client` | Browser | `zod` | Reactive external store, HTTP transport, cross-tab broadcast, and SSE stream parser. Zero React/database dependencies. |
+| `interaction-builder/react` | React (Browser) | `react >= 18`, `react-dom >= 18`, `zod` | `<InteractionProvider>`, `useWorkspaceView`, `useSendMessage`, `useDispatchAction`, `useInteractionHistory`. Client component boundary (`'use client'`). |
+| `interaction-builder/runtime` | Server (Node.js) | `zod` | Generic repository interface, action planning service, handlers, runner loop, deterministic UUIDs. |
+| `interaction-builder/adapters/pg` | Server (Node.js) | `pg ^8.11.0` (optional peer) | Pure PostgreSQL repository using native `pg.Pool` without ORM dependencies. |
+| `interaction-builder/adapters/sqlite` | Server / Edge / Local | None (uses injected driver) | Universal SQLite / LibSQL repository for local dev, desktop, Turso, Cloudflare D1. |
+| `interaction-builder/adapters/http` | Server (Web Standard) | None | Web Fetch standard `Request` / `Response` dispatcher for Next.js, Express, Fastify, or Cloudflare Workers. |
+| `interaction-builder/adapters/ai` | Server | `ai ^7.0.0` | Vercel AI SDK adapter (`createAiSdkModelAdapter`) with error boundaries and abort signaling. |
+| `interaction-builder/testkit` | Tests | `ai ^7.0.0` | `MemoryInteractionRepository`, scripted mock models, and reference domain fixtures (`agendaDomain`). |
+
+> **Browser Bundling Rule**: For frontend web apps, always import from `interaction-builder/core`, `interaction-builder/client`, or `interaction-builder/react`. Do not import from server-facing subpaths (`/runtime`, `/adapters/pg`) to avoid bundling server modules.
 
 ---
 

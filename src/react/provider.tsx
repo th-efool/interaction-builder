@@ -11,7 +11,7 @@ export interface InteractionProviderProps<View> {
   initialView?: View;
   transport?: InteractionTransport<View>;
   store?: InteractionStore<View>;
-  children: React.ReactNode;
+  children?: React.ReactNode;
 }
 
 export const InteractionContext = createContext<InteractionStore<any> | null>(null);
