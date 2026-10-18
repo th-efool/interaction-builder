@@ -92,6 +92,7 @@ export interface InteractionStore<View> {
 export interface InteractionStoreOptions<View> {
     workspaceId: string;
     initialView: View;
+    initialRevision?: number;
     transport: InteractionTransport<View>;
     newId?: () => string;
     reconnectDelayMs?: number;

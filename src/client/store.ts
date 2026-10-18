@@ -80,6 +80,7 @@ export interface InteractionStore<View> {
 export interface InteractionStoreOptions<View> {
   workspaceId: string;
   initialView: View;
+  initialRevision?: number;
   transport: InteractionTransport<View>;
   newId?: () => string;
   reconnectDelayMs?: number;
@@ -105,7 +106,7 @@ export function createInteractionStore<View>(opts: InteractionStoreOptions<View>
 
   let state: StoreState<View> = {
     workspaceId,
-    revision: 0,
+    revision: opts.initialRevision ?? 0,
     sequence: 0,
     view: opts.initialView,
     messages: [],
@@ -129,7 +130,7 @@ export function createInteractionStore<View>(opts: InteractionStoreOptions<View>
   const future: HistoryEntry<View>[] = [];
   let isTimeTraveling = false;
   let liveView: View = opts.initialView;
-  let liveRevision: number = 0;
+  let liveRevision: number = opts.initialRevision ?? 0;
 
   let historySnapshot = {
     past: [] as HistoryEntry<View>[],
@@ -268,7 +269,7 @@ export function createInteractionStore<View>(opts: InteractionStoreOptions<View>
   }
 
   // Revision we already hold a view for (set by our own commit/snapshot).
-  let viewRevision = 0;
+  let viewRevision = opts.initialRevision ?? 0;
   const viewCoversRevision = (rev: number) => rev <= viewRevision;
 
   function scheduleReopen() {

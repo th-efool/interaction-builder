@@ -1786,7 +1786,7 @@ function createInteractionStore(opts) {
   const maxHistory = opts.maxHistory ?? 50;
   let state = {
     workspaceId,
-    revision: 0,
+    revision: opts.initialRevision ?? 0,
     sequence: 0,
     view: opts.initialView,
     messages: [],
@@ -1807,7 +1807,7 @@ function createInteractionStore(opts) {
   const future = [];
   let isTimeTraveling = false;
   let liveView = opts.initialView;
-  let liveRevision = 0;
+  let liveRevision = opts.initialRevision ?? 0;
   let historySnapshot = {
     past: [],
     future: [],
@@ -1921,7 +1921,7 @@ function createInteractionStore(opts) {
       void resnapshot().catch(() => void 0);
     }
   }
-  let viewRevision = 0;
+  let viewRevision = opts.initialRevision ?? 0;
   const viewCoversRevision = (rev) => rev <= viewRevision;
   function scheduleReopen() {
     if (stopped) return;
