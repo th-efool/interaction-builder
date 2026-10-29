@@ -459,7 +459,7 @@ async function runAssistantTurn(opts) {
       timestamp: turnStartTime
     });
   }
-  const ws = await repo.loadWorkspace({ workspaceId, ownerId });
+  const ws = opts.initialWorkspace && opts.initialWorkspace.id === workspaceId && opts.initialWorkspace.ownerId === ownerId ? opts.initialWorkspace : await repo.loadWorkspace({ workspaceId, ownerId });
   if (!ws) throw new Error("WORKSPACE_NOT_FOUND");
   if (ws.lifecycle !== "active") throw new Error("WORKSPACE_NOT_ACTIVE");
   if (ws.domainId !== domain.id) throw new Error(`DOMAIN_MISMATCH: Workspace domain is "${ws.domainId}" but runner domain is "${domain.id}"`);
@@ -468,8 +468,8 @@ async function runAssistantTurn(opts) {
     throw new Error(`UNSUPPORTED_DOMAIN_VERSION: Workspace domain version ${ws.domainVersion} is not supported by runner for domain "${domain.id}" (supported: ${domain.version})`);
   }
   let observedRevision = opts.observedRevision ?? ws.revision;
-  let triggeringMessageId = null;
-  if (runId) {
+  let triggeringMessageId = opts.triggeringMessageId ?? null;
+  if (runId && (opts.triggeringMessageId === void 0 || opts.observedRevision === void 0)) {
     const run = await repo.getRun({ runId, workspaceId });
     if (run) {
       if (run.status === "canceled") throw new Error("RUN_CANCELED");
@@ -486,7 +486,12 @@ async function runAssistantTurn(opts) {
       trigger = page.find((message) => message.id === triggeringMessageId);
     }
     if (!trigger) throw new Error("TRIGGERING_MESSAGE_NOT_FOUND");
-    history = await repo.listMessages({ workspaceId, ownerId, beforeSequence: trigger.sequence + 1, limit: 20 });
+    const eligible = page.filter((m) => m.sequence <= trigger.sequence);
+    if (eligible.length >= Math.min(20, page.length)) {
+      history = eligible.slice(0, 20);
+    } else {
+      history = await repo.listMessages({ workspaceId, ownerId, beforeSequence: trigger.sequence + 1, limit: 20 });
+    }
   } else {
     history = await repo.listMessages({ workspaceId, ownerId, limit: 20 });
   }
@@ -1333,7 +1338,7 @@ data: ${JSON.stringify(e)}
 async function streamEvents(h, ownerId, workspaceId, after, opts = {}) {
   const first = await h.getEvents(ownerId, workspaceId, after);
   if (first.status !== 200) return new Response(JSON.stringify(first.body), { status: first.status, headers: { "content-type": "application/json", "cache-control": "no-store" } });
-  const { pollMs = 1e3, maxMs = 25e3, heartbeatMs = 1e4, signal } = opts;
+  const { pollMs = 150, maxMs = 25e3, heartbeatMs = 1e4, signal } = opts;
   const enc = new TextEncoder();
   let cursor = after;
   let closed = false;

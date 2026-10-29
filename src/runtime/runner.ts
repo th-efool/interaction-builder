@@ -1,4 +1,4 @@
-import type { InteractionRepository } from './repository';
+import type { InteractionRepository, InteractionWorkspaceRecord } from './repository';
 import type { DomainDefinition } from './handlers';
 import { computePayloadHash } from './repository';
 import type { InteractionTelemetryPort } from './telemetry';
@@ -56,6 +56,8 @@ export interface AssistantRunOptions<State = unknown> {
   runId?: string;
   leaseToken?: string;
   observedRevision?: number;
+  triggeringMessageId?: string | null;
+  initialWorkspace?: InteractionWorkspaceRecord<State> | null;
   maxSteps?: number;
   systemPrompt?: string;
   signal?: AbortSignal;
@@ -89,7 +91,9 @@ export async function runAssistantTurn<State>(
     });
   }
 
-  const ws = await repo.loadWorkspace<State>({ workspaceId, ownerId });
+  const ws = (opts.initialWorkspace && opts.initialWorkspace.id === workspaceId && opts.initialWorkspace.ownerId === ownerId)
+    ? opts.initialWorkspace
+    : await repo.loadWorkspace<State>({ workspaceId, ownerId });
   if (!ws) throw new Error('WORKSPACE_NOT_FOUND');
   if (ws.lifecycle !== 'active') throw new Error('WORKSPACE_NOT_ACTIVE');
   if (ws.domainId !== domain.id) throw new Error(`DOMAIN_MISMATCH: Workspace domain is "${ws.domainId}" but runner domain is "${domain.id}"`);
@@ -99,8 +103,8 @@ export async function runAssistantTurn<State>(
   }
 
   let observedRevision = opts.observedRevision ?? ws.revision;
-  let triggeringMessageId: string | null = null;
-  if (runId) {
+  let triggeringMessageId: string | null = opts.triggeringMessageId ?? null;
+  if (runId && (opts.triggeringMessageId === undefined || opts.observedRevision === undefined)) {
     const run = await repo.getRun({ runId, workspaceId });
     if (run) {
       if (run.status === 'canceled') throw new Error('RUN_CANCELED');
@@ -118,7 +122,12 @@ export async function runAssistantTurn<State>(
       trigger = page.find(message => message.id === triggeringMessageId);
     }
     if (!trigger) throw new Error('TRIGGERING_MESSAGE_NOT_FOUND');
-    history = await repo.listMessages({ workspaceId, ownerId, beforeSequence: trigger.sequence + 1, limit: 20 });
+    const eligible = page.filter(m => m.sequence <= trigger.sequence);
+    if (eligible.length >= Math.min(20, page.length)) {
+      history = eligible.slice(0, 20);
+    } else {
+      history = await repo.listMessages({ workspaceId, ownerId, beforeSequence: trigger.sequence + 1, limit: 20 });
+    }
   } else {
     history = await repo.listMessages({ workspaceId, ownerId, limit: 20 });
   }

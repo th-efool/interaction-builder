@@ -1,4 +1,4 @@
-import type { InteractionRepository } from './repository';
+import type { InteractionRepository, InteractionWorkspaceRecord } from './repository';
 import type { DomainDefinition } from './handlers';
 import type { InteractionTelemetryPort } from './telemetry';
 export interface InteractionModelMessage {
@@ -48,6 +48,8 @@ export interface AssistantRunOptions<State = unknown> {
     runId?: string;
     leaseToken?: string;
     observedRevision?: number;
+    triggeringMessageId?: string | null;
+    initialWorkspace?: InteractionWorkspaceRecord<State> | null;
     maxSteps?: number;
     systemPrompt?: string;
     signal?: AbortSignal;

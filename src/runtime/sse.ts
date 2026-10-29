@@ -28,7 +28,7 @@ export async function streamEvents(h: Handlers, ownerId: string, workspaceId: st
   const first = await h.getEvents(ownerId, workspaceId, after);
   if (first.status !== 200) return new Response(JSON.stringify(first.body), { status: first.status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
 
-  const { pollMs = 1000, maxMs = 25_000, heartbeatMs = 10_000, signal } = opts;
+  const { pollMs = 150, maxMs = 25_000, heartbeatMs = 10_000, signal } = opts;
   const enc = new TextEncoder();
   let cursor = after;
   let closed = false;

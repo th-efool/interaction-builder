@@ -676,7 +676,7 @@ async function runAssistantTurn(opts) {
       timestamp: turnStartTime
     });
   }
-  const ws = await repo.loadWorkspace({ workspaceId, ownerId });
+  const ws = opts.initialWorkspace && opts.initialWorkspace.id === workspaceId && opts.initialWorkspace.ownerId === ownerId ? opts.initialWorkspace : await repo.loadWorkspace({ workspaceId, ownerId });
   if (!ws) throw new Error("WORKSPACE_NOT_FOUND");
   if (ws.lifecycle !== "active") throw new Error("WORKSPACE_NOT_ACTIVE");
   if (ws.domainId !== domain.id) throw new Error(`DOMAIN_MISMATCH: Workspace domain is "${ws.domainId}" but runner domain is "${domain.id}"`);
@@ -685,8 +685,8 @@ async function runAssistantTurn(opts) {
     throw new Error(`UNSUPPORTED_DOMAIN_VERSION: Workspace domain version ${ws.domainVersion} is not supported by runner for domain "${domain.id}" (supported: ${domain.version})`);
   }
   let observedRevision = opts.observedRevision ?? ws.revision;
-  let triggeringMessageId = null;
-  if (runId) {
+  let triggeringMessageId = opts.triggeringMessageId ?? null;
+  if (runId && (opts.triggeringMessageId === void 0 || opts.observedRevision === void 0)) {
     const run = await repo.getRun({ runId, workspaceId });
     if (run) {
       if (run.status === "canceled") throw new Error("RUN_CANCELED");
@@ -703,7 +703,12 @@ async function runAssistantTurn(opts) {
       trigger = page.find((message) => message.id === triggeringMessageId);
     }
     if (!trigger) throw new Error("TRIGGERING_MESSAGE_NOT_FOUND");
-    history = await repo.listMessages({ workspaceId, ownerId, beforeSequence: trigger.sequence + 1, limit: 20 });
+    const eligible = page.filter((m) => m.sequence <= trigger.sequence);
+    if (eligible.length >= Math.min(20, page.length)) {
+      history = eligible.slice(0, 20);
+    } else {
+      history = await repo.listMessages({ workspaceId, ownerId, beforeSequence: trigger.sequence + 1, limit: 20 });
+    }
   } else {
     history = await repo.listMessages({ workspaceId, ownerId, limit: 20 });
   }
@@ -1550,7 +1555,7 @@ data: ${JSON.stringify(e)}
 async function streamEvents(h, ownerId, workspaceId, after, opts = {}) {
   const first = await h.getEvents(ownerId, workspaceId, after);
   if (first.status !== 200) return new Response(JSON.stringify(first.body), { status: first.status, headers: { "content-type": "application/json", "cache-control": "no-store" } });
-  const { pollMs = 1e3, maxMs = 25e3, heartbeatMs = 1e4, signal } = opts;
+  const { pollMs = 150, maxMs = 25e3, heartbeatMs = 1e4, signal } = opts;
   const enc = new TextEncoder();
   let cursor = after;
   let closed = false;
@@ -1948,19 +1953,34 @@ function createInteractionStore(opts) {
     async connect() {
       stopped = false;
       reconnectAttempts = 0;
-      const s = await transport.getWorkspace();
-      viewRevision = s.revision;
-      liveRevision = s.revision;
-      liveView = s.snapshot;
-      apply({
-        kind: "snapshot",
-        workspaceId,
-        revision: s.revision,
-        sequence: s.cursor,
-        view: s.snapshot,
-        messages: s.messages ?? []
-      });
-      open();
+      if (opts.initialView !== void 0 && opts.initialRevision !== void 0) {
+        viewRevision = opts.initialRevision;
+        liveRevision = opts.initialRevision;
+        liveView = opts.initialView;
+        apply({
+          kind: "snapshot",
+          workspaceId,
+          revision: opts.initialRevision,
+          sequence: 0,
+          view: opts.initialView,
+          messages: []
+        });
+        open();
+      } else {
+        const s = await transport.getWorkspace();
+        viewRevision = s.revision;
+        liveRevision = s.revision;
+        liveView = s.snapshot;
+        apply({
+          kind: "snapshot",
+          workspaceId,
+          revision: s.revision,
+          sequence: s.cursor,
+          view: s.snapshot,
+          messages: s.messages ?? []
+        });
+        open();
+      }
     },
     disconnect() {
       stopped = true;
@@ -1973,6 +1993,28 @@ function createInteractionStore(opts) {
     async dispatchAction(action, entityVersions = []) {
       const actionId = newId();
       apply({ kind: "request_pending", actionId });
+      let optimisticApplied = false;
+      const priorState = state;
+      if (opts.plan && !isTimeTraveling) {
+        try {
+          const planResult = opts.plan(state.view, action, {
+            actionId,
+            workspaceId,
+            expectedRevision: state.revision,
+            currentRevision: state.revision,
+            entityVersions: new Map(entityVersions.map((v) => [v.id, v.version]))
+          });
+          if (planResult && planResult.nextState) {
+            optimisticApplied = true;
+            set({
+              ...state,
+              view: planResult.nextState,
+              pending: { ...state.pending, [actionId]: "pending" }
+            });
+          }
+        } catch {
+        }
+      }
       try {
         const res = await transport.commit(
           { actionId, workspaceId, expectedRevision: state.revision, entityVersions, action },
@@ -1992,7 +2034,11 @@ function createInteractionStore(opts) {
             isTimeTraveling: false
           });
         } else {
-          set({ ...state, pending: omit(state.pending, actionId) });
+          set({
+            ...state,
+            view: res.snapshot ?? state.view,
+            pending: omit(state.pending, actionId)
+          });
         }
         return true;
       } catch (e) {
@@ -2033,8 +2079,16 @@ function createInteractionStore(opts) {
           } catch {
           }
         }
-        apply({ kind: "request_failed", actionId });
-        set({ ...state, lastError: { actionId, code } });
+        if (optimisticApplied) {
+          set({
+            ...priorState,
+            pending: { ...priorState.pending, [actionId]: "failed" },
+            lastError: { actionId, code }
+          });
+        } else {
+          apply({ kind: "request_failed", actionId });
+          set({ ...state, lastError: { actionId, code } });
+        }
         if (code === "CONFLICT") void resnapshot().catch(() => void 0);
         return false;
       }

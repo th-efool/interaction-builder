@@ -528,19 +528,34 @@ function createInteractionStore(opts) {
     async connect() {
       stopped = false;
       reconnectAttempts = 0;
-      const s = await transport.getWorkspace();
-      viewRevision = s.revision;
-      liveRevision = s.revision;
-      liveView = s.snapshot;
-      apply({
-        kind: "snapshot",
-        workspaceId,
-        revision: s.revision,
-        sequence: s.cursor,
-        view: s.snapshot,
-        messages: s.messages ?? []
-      });
-      open();
+      if (opts.initialView !== void 0 && opts.initialRevision !== void 0) {
+        viewRevision = opts.initialRevision;
+        liveRevision = opts.initialRevision;
+        liveView = opts.initialView;
+        apply({
+          kind: "snapshot",
+          workspaceId,
+          revision: opts.initialRevision,
+          sequence: 0,
+          view: opts.initialView,
+          messages: []
+        });
+        open();
+      } else {
+        const s = await transport.getWorkspace();
+        viewRevision = s.revision;
+        liveRevision = s.revision;
+        liveView = s.snapshot;
+        apply({
+          kind: "snapshot",
+          workspaceId,
+          revision: s.revision,
+          sequence: s.cursor,
+          view: s.snapshot,
+          messages: s.messages ?? []
+        });
+        open();
+      }
     },
     disconnect() {
       stopped = true;
@@ -553,6 +568,28 @@ function createInteractionStore(opts) {
     async dispatchAction(action, entityVersions = []) {
       const actionId = newId();
       apply({ kind: "request_pending", actionId });
+      let optimisticApplied = false;
+      const priorState = state;
+      if (opts.plan && !isTimeTraveling) {
+        try {
+          const planResult = opts.plan(state.view, action, {
+            actionId,
+            workspaceId,
+            expectedRevision: state.revision,
+            currentRevision: state.revision,
+            entityVersions: new Map(entityVersions.map((v) => [v.id, v.version]))
+          });
+          if (planResult && planResult.nextState) {
+            optimisticApplied = true;
+            set({
+              ...state,
+              view: planResult.nextState,
+              pending: { ...state.pending, [actionId]: "pending" }
+            });
+          }
+        } catch {
+        }
+      }
       try {
         const res = await transport.commit(
           { actionId, workspaceId, expectedRevision: state.revision, entityVersions, action },
@@ -572,7 +609,11 @@ function createInteractionStore(opts) {
             isTimeTraveling: false
           });
         } else {
-          set({ ...state, pending: omit(state.pending, actionId) });
+          set({
+            ...state,
+            view: res.snapshot ?? state.view,
+            pending: omit(state.pending, actionId)
+          });
         }
         return true;
       } catch (e) {
@@ -613,8 +654,16 @@ function createInteractionStore(opts) {
           } catch {
           }
         }
-        apply({ kind: "request_failed", actionId });
-        set({ ...state, lastError: { actionId, code } });
+        if (optimisticApplied) {
+          set({
+            ...priorState,
+            pending: { ...priorState.pending, [actionId]: "failed" },
+            lastError: { actionId, code }
+          });
+        } else {
+          apply({ kind: "request_failed", actionId });
+          set({ ...state, lastError: { actionId, code } });
+        }
         if (code === "CONFLICT") void resnapshot().catch(() => void 0);
         return false;
       }
