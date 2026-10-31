@@ -656,7 +656,15 @@ function createInteractionHandlers(deps) {
     async getEvents(ownerId, workspaceId, after = 0) {
       try {
         const events = await deps.repo.queryEvents({ workspaceId, ownerId, afterSequence: after });
-        return { status: 200, body: { events } };
+        return { status: 200, body: { events: events.map((event) => interactionEventSchema.parse({
+          eventId: event.id,
+          protocolVersion: event.protocolVersion,
+          workspaceId: event.workspaceId,
+          sequence: event.sequence,
+          type: event.type,
+          ...event.revision === null ? {} : { revision: event.revision },
+          payload: event.payload
+        })) } };
       } catch (e) {
         return toErrorResult(e);
       }

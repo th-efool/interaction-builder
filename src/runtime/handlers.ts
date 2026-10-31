@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { actionEnvelopeSchema, type DomainActionPlan } from '../core/contracts';
+import { actionEnvelopeSchema, interactionEventSchema, type DomainActionPlan } from '../core/contracts';
 import type { InteractionRepository } from './repository';
 
 /** Host-registered domain. Engine knows nothing about cohorts/agendas. */
@@ -345,7 +345,13 @@ export function createInteractionHandlers(deps: InteractionHandlerDeps) {
     async getEvents(ownerId: string, workspaceId: string, after = 0): Promise<HandlerResult> {
       try {
         const events = await deps.repo.queryEvents({ workspaceId, ownerId, afterSequence: after });
-        return { status: 200, body: { events } };
+        // Persistence rows are not wire events: both JSON and SSE use this boundary.
+        return { status: 200, body: { events: events.map(event => interactionEventSchema.parse({
+          eventId: event.id, protocolVersion: event.protocolVersion,
+          workspaceId: event.workspaceId, sequence: event.sequence, type: event.type,
+          ...(event.revision === null ? {} : { revision: event.revision }),
+          payload: event.payload,
+        })) } };
       } catch (e) {
         return toErrorResult(e);
       }
