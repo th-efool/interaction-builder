@@ -6,6 +6,10 @@ import type {
 } from '../../runtime/runner';
 
 export interface AiSdkAdapterOptions {
+  maxRetries?: number;
+  timeoutMs?: number;
+  maxOutputTokens?: number;
+  signal?: AbortSignal;
   streaming?: boolean;
   onChunk?: (text: string) => void;
   onToolCallStart?: (toolName: string, callId?: string) => void;
@@ -25,6 +29,12 @@ export function createAiSdkModelAdapter(
 
       let fatalToolError: unknown = null;
       const ac = new AbortController();
+      const abortSignal = AbortSignal.any([
+        ac.signal,
+        ...(options?.signal ? [options.signal] : []),
+        ...(options?.timeoutMs ? [AbortSignal.timeout(options.timeoutMs)] : []),
+      ]);
+      const policy = { maxRetries: options?.maxRetries, maxOutputTokens: options?.maxOutputTokens };
 
       const wrappedTools: Record<string, any> = {};
       for (const [name, t] of Object.entries(input.tools)) {
@@ -53,11 +63,12 @@ export function createAiSdkModelAdapter(
       if (options?.streaming && options?.onChunk) {
         try {
           const streamResult = streamText({
+            ...policy,
             model,
             system: input.systemPrompt,
             messages,
             tools: wrappedTools,
-            abortSignal: ac.signal,
+            abortSignal,
             stopWhen: stepCountIs(input.maxSteps ?? 5),
           });
 
@@ -89,11 +100,12 @@ export function createAiSdkModelAdapter(
       let result;
       try {
         result = await generateText({
+          ...policy,
           model,
           system: input.systemPrompt,
           messages,
           tools: wrappedTools,
-          abortSignal: ac.signal,
+          abortSignal,
           stopWhen: stepCountIs(input.maxSteps ?? 5),
         });
       } catch (err) {

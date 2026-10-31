@@ -9,6 +9,12 @@ function createAiSdkModelAdapter(model, options) {
       }));
       let fatalToolError = null;
       const ac = new AbortController();
+      const abortSignal = AbortSignal.any([
+        ac.signal,
+        ...options?.signal ? [options.signal] : [],
+        ...options?.timeoutMs ? [AbortSignal.timeout(options.timeoutMs)] : []
+      ]);
+      const policy = { maxRetries: options?.maxRetries, maxOutputTokens: options?.maxOutputTokens };
       const wrappedTools = {};
       for (const [name, t] of Object.entries(input.tools)) {
         if (t && typeof t.execute === "function") {
@@ -35,11 +41,12 @@ function createAiSdkModelAdapter(model, options) {
       if (options?.streaming && options?.onChunk) {
         try {
           const streamResult = streamText({
+            ...policy,
             model,
             system: input.systemPrompt,
             messages,
             tools: wrappedTools,
-            abortSignal: ac.signal,
+            abortSignal,
             stopWhen: stepCountIs(input.maxSteps ?? 5)
           });
           for await (const chunk of streamResult.textStream) {
@@ -66,11 +73,12 @@ function createAiSdkModelAdapter(model, options) {
       let result;
       try {
         result = await generateText({
+          ...policy,
           model,
           system: input.systemPrompt,
           messages,
           tools: wrappedTools,
-          abortSignal: ac.signal,
+          abortSignal,
           stopWhen: stepCountIs(input.maxSteps ?? 5)
         });
       } catch (err) {
