@@ -6,7 +6,7 @@
 
 **Deterministic conversational interaction engine with transactional persistence, tool execution, and UI synchronization.**
 
-Interaction Builder allows you to build AI-powered collaborative workspaces (canvas editors, kanban boards, document suites, meeting planners) where **users and AI assistants collaborate on the exact same live state** with transactional durability, optimistic UI updates, and zero state desynchronization.
+Interaction Builder allows you to build AI-powered collaborative workspaces (canvas editors, kanban boards, document suites, meeting planners, cohort studios) where **users and AI assistants collaborate on the exact same live state** with transactional durability, optimistic UI updates, dynamic multi-step AI thought-trails, and zero state desynchronization.
 
 ---
 
@@ -17,6 +17,7 @@ LLMs are probabilistic, whereas business applications require strict consistency
 2. **Race Conditions**: When a user edits an item in the browser while an AI assistant is deliberating on an older snapshot, naive systems overwrite the user's change. Interaction Builder enforces monotonic revisions (`STALE_WORKSPACE`) without polling.
 3. **Ghost Workers**: Background AI workers that timeout or crash must never commit stale mutations. Interaction Builder uses token-fenced database leases (`FOR UPDATE SKIP LOCKED`).
 4. **Idempotency Guarantee**: Retrying a crashed assistant run reuses committed receipts via deterministic UUID hashing without repeating side-effects.
+5. **Rich Conversational UX Out of the Box**: Includes `<InteractionStepTrail />` (variable 2–5 step seeded AI thought-trails with topic-aware phrasing), `useAnchoredActivityBubble` (chronological search/discovery anchoring), `resolveSplitCanvasLayout` (delayed "Tadada~" split-view reveal), and `createImplicitActionDetector` (instant natural-language action routing).
 
 ---
 
@@ -24,7 +25,7 @@ LLMs are probabilistic, whereas business applications require strict consistency
 
 ```mermaid
 graph TD
-  A["Client Layer (React / External Store)<br/>Optimistic reducer, SSE event stream, instant feedback"] --> B["Runtime Layer<br/>planActionCommit validation, assistant runner loop, step journaling, fencing"]
+  A["Client Layer (React / External Store)<br/>Optimistic reducer, SSE event stream, InteractionStepTrail, instant feedback"] --> B["Runtime Layer<br/>planActionCommit validation, assistant runner loop, step journaling, fencing"]
   B --> C["Durability Layer<br/>8 PostgreSQL tables, FOR UPDATE SKIP LOCKED, outbox intent pattern, request ledger"]
 ```
 
@@ -34,11 +35,12 @@ graph TD
 
 Explore the complete documentation in [`docs/`](./docs/README.md):
 
+- 🤖 **[One-Prompt AI Integration Guide](./docs/one-prompt-ai-integration-guide.md)**: Copy-paste prompt & blueprint to integrate `interaction-builder` into any site in one prompt
 - 📖 **[Quickstart Guide](./docs/quickstart.md)**: Zero-to-running in 5 minutes
 - 🏛️ **[Architecture & Durability Engine](./docs/architecture.md)**: 3-Layer model, revisions, outbox, and lease fencing
 - 📜 **[Core Contracts & Schemas](./docs/core-contracts.md)**: Envelopes, receipts, entity refs, and reducer
 - ⚙️ **[Runtime Orchestration](./docs/runtime-guide.md)**: Action service, handlers, runner loop, and crash recovery
-- ⚛️ **[React & Client Store](./docs/react-and-client.md)**: `<InteractionProvider>`, typed hooks, optimistic updates
+- ⚛️ **[React & Client Store](./docs/react-and-client.md)**: `<InteractionProvider>`, typed hooks, `<InteractionStepTrail />`, optimistic updates
 - 🔌 **[Adapters Guide](./docs/adapters-guide.md)**: PostgreSQL (`pg.Pool`), AI SDK, and Web standard HTTP
 - 🧪 **[Testing Guide](./docs/testing-guide.md)**: Unit, integration, and headless component testing with `testkit`
 - 🛠️ **[Custom Domain Walkthrough](./docs/custom-domain-example.md)**: Full tutorial building a Meeting Agenda domain
@@ -53,9 +55,9 @@ The package provides strict subpath isolation so consumers only bundle and insta
 | Export | Environment | Required Dependencies | Description |
 |---|---|---|---|
 | `interaction-builder` | Node.js (Isomorphic) | `zod` | Combined barrel exporting `core`, `runtime`, and `client`. |
-| `interaction-builder/core` | Universal (Browser & Server) | `zod` | Schemas, action envelopes, receipts, entity refs, events, and pure reducer. Zero server dependencies. |
+| `interaction-builder/core` | Universal (Browser & Server) | `zod` | Schemas, action envelopes, receipts, entity refs, events, pure reducer, and `progress-ux` helpers (`buildVariedSteps`, `resolveActivityAnchorMessageId`, `createImplicitActionDetector`, `resolveSplitCanvasLayout`, `createStageSuggestions`). Zero server dependencies. |
 | `interaction-builder/client` | Browser | `zod` | Reactive external store, HTTP transport, cross-tab broadcast, and SSE stream parser. Zero React/database dependencies. |
-| `interaction-builder/react` | React (Browser) | `react >= 18`, `react-dom >= 18`, `zod` | `<InteractionProvider>`, `useWorkspaceView`, `useSendMessage`, `useDispatchAction`, `useInteractionHistory`. Client component boundary (`'use client'`). |
+| `interaction-builder/react` | React (Browser) | `react >= 18`, `react-dom >= 18`, `zod` | `<InteractionProvider>`, `useWorkspaceView`, `useSendMessage`, `useDispatchAction`, `useInteractionHistory`, `<InteractionStepTrail />`, `useStepProgression`, `useAnchoredActivityBubble`, `useAssistantActivity`. Client component boundary (`'use client'`). |
 | `interaction-builder/runtime` | Server (Node.js) | `zod` | Generic repository interface, action planning service, handlers, runner loop, deterministic UUIDs. |
 | `interaction-builder/adapters/pg` | Server (Node.js) | `pg ^8.11.0` (optional peer) | Pure PostgreSQL repository using native `pg.Pool` without ORM dependencies. |
 | `interaction-builder/adapters/sqlite` | Server / Edge / Local | None (uses injected driver) | Universal SQLite / LibSQL repository for local dev, desktop, Turso, Cloudflare D1. |
@@ -101,7 +103,14 @@ export const documentDomain: DomainDefinition<DocumentState> = {
 'use client';
 
 import React from 'react';
-import { InteractionProvider, useWorkspaceView, useSendMessage, useDispatchAction } from 'interaction-builder/react';
+import {
+  InteractionProvider,
+  InteractionStepTrail,
+  useWorkspaceView,
+  useSendMessage,
+  useDispatchAction,
+  buildVariedSteps,
+} from 'interaction-builder/react';
 
 export function DocumentApp({ workspaceId, initialDoc }: { workspaceId: string; initialDoc: DocumentState }) {
   return (
@@ -115,10 +124,17 @@ function DocumentView() {
   const doc = useWorkspaceView<DocumentState>();
   const dispatchAction = useDispatchAction();
   const sendMessage = useSendMessage();
+  const steps = buildVariedSteps({
+    seedKey: doc.title,
+    topic: doc.title,
+    isActive: false,
+    activePhaseIndex: 5,
+  });
 
   return (
     <div>
       <h1>{doc.title}</h1>
+      <InteractionStepTrail steps={steps} />
       <button onClick={() => dispatchAction({ type: 'set_title', title: 'New Title' })}>
         Rename Direct
       </button>

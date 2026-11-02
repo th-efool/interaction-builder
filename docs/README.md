@@ -6,6 +6,9 @@ Welcome to the comprehensive documentation for **Interaction Builder** — the d
 
 ## Table of Contents
 
+### 0. [One-Prompt AI Integration Guide](./one-prompt-ai-integration-guide.md)
+Copy-pasteable master prompt and end-to-end blueprint allowing any AI coding assistant (Claude, Cursor, Antigravity, Windsurf, Codex) to wire `interaction-builder` into any site in a single pass—including `<InteractionStepTrail />` (variable 2–5 steps with rich seeded variations), `useAnchoredActivityBubble` (chronological search/discovery anchoring), `resolveSplitCanvasLayout` ("Tadada~" split-view reveal), and `createImplicitActionDetector` (instant natural-language action routing).
+
 ### 1. [Quickstart Guide](./quickstart.md)
 Get up and running in under 5 minutes. Learn how to install the package, define a domain, configure the PostgreSQL storage adapter, set up the assistant runner, and render the interactive React UI.
 
@@ -45,6 +48,13 @@ Build responsive, optimistic frontends:
   - `useSendMessage()`
   - `usePendingActions()`
   - `useInteractionStream()`
+- Conversational Progress UX & Stepper primitives:
+  - `<InteractionStepTrail />`
+  - `useStepProgression()`
+  - `useAnchoredActivityBubble()`
+  - `useAssistantActivity()`
+  - `buildVariedSteps()`, `buildVariedSearchSteps()`, `buildVariedTurnSteps()`, `buildVariedSearchSummary()`
+  - `createImplicitActionDetector()`, `resolveSplitCanvasLayout()`, `createStageSuggestions()`
 - HTTP transport and Server-Sent Events (SSE) streaming
 
 ### 6. [Adapters Guide](./adapters-guide.md)
@@ -73,4 +83,3 @@ Authoritative specification for contracts, upgrades, and host integration:
 - Safe downgrade limitations and failure boundaries
 - Native-state (Profile 1) vs Host-owned resource (Profile 2) profiles
 - Clean-host installation checklist and setup guide
-
